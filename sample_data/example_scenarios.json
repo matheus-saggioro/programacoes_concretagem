@@ -1,0 +1,123 @@
+{
+  "examples": [
+    {
+      "name": "Operação compartilhada Serra - duas frentes",
+      "calculation_mode": "automatico",
+      "max_total_bts": 10,
+      "scenarios": [
+        {
+          "id": "serra-pier-01",
+          "nome_programacao": "Pilar P1",
+          "local": "Serra das Araras - Lote 1",
+          "elemento_frente": "Pilar P1",
+          "usina": "Usina Serra 01",
+          "tipo_cimento": "CP V-ARI",
+          "observacoes": "Concretagem com bomba e janela de descarga crítica.",
+          "volume_total_m3": 52.0,
+          "capacidade_bt_m3": 8.0,
+          "numero_bts_fixo": 4,
+          "inicio_primeira_mistura": "07:00",
+          "prazo_limite_descarga": "10:40",
+          "ciclo": {
+            "mistura_min": 10.0,
+            "dosagem_min": 6.0,
+            "ida_min": 28.0,
+            "slump_min": 5.0,
+            "descarga_min": 20.0,
+            "lavagem_min": 10.0,
+            "volta_min": 24.0
+          },
+          "restricoes": {
+            "com_bomba": true,
+            "max_bts_frente": 1,
+            "max_bts_mistura": 2,
+            "max_bts_dosagem": 1,
+            "existe_intervalo_entre_misturas": true,
+            "intervalo_entre_misturas_min": 6.0,
+            "ultima_viagem_parcial_proporcional": true,
+            "permitir_primeira_viagem_customizada": true,
+            "volume_primeira_viagem_m3": 6.0,
+            "alocacao_bts": "compartilhadas"
+          }
+        },
+        {
+          "id": "serra-slab-02",
+          "nome_programacao": "Laje L2",
+          "local": "Serra das Araras - Lote 1",
+          "elemento_frente": "Laje L2",
+          "usina": "Usina Serra 01",
+          "tipo_cimento": "CP II-F 40",
+          "observacoes": "Frente sem bomba, compartilhando mistura e dosagem com a usina principal.",
+          "volume_total_m3": 30.0,
+          "capacidade_bt_m3": 8.0,
+          "numero_bts_fixo": 4,
+          "inicio_primeira_mistura": "07:20",
+          "prazo_limite_descarga": "10:20",
+          "ciclo": {
+            "mistura_min": 10.0,
+            "dosagem_min": 6.0,
+            "ida_min": 22.0,
+            "slump_min": 4.0,
+            "descarga_min": 16.0,
+            "lavagem_min": 8.0,
+            "volta_min": 20.0
+          },
+          "restricoes": {
+            "com_bomba": false,
+            "max_bts_frente": 2,
+            "max_bts_mistura": 2,
+            "max_bts_dosagem": 1,
+            "existe_intervalo_entre_misturas": true,
+            "intervalo_entre_misturas_min": 6.0,
+            "ultima_viagem_parcial_proporcional": true,
+            "permitir_primeira_viagem_customizada": false,
+            "volume_primeira_viagem_m3": null,
+            "alocacao_bts": "compartilhadas"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Frente simples com 1 BT e última parcial",
+      "calculation_mode": "fixo",
+      "max_total_bts": 6,
+      "scenarios": [
+        {
+          "id": "serra-bloco-03",
+          "nome_programacao": "Bloco B3",
+          "local": "Serra das Araras - Lote 2",
+          "elemento_frente": "Bloco B3",
+          "usina": "Usina Serra 02",
+          "tipo_cimento": "CP III 40 RS",
+          "observacoes": "Cenário enxuto para validar ciclo completo com uma única BT.",
+          "volume_total_m3": 14.0,
+          "capacidade_bt_m3": 8.0,
+          "numero_bts_fixo": 1,
+          "inicio_primeira_mistura": "06:30",
+          "prazo_limite_descarga": "09:30",
+          "ciclo": {
+            "mistura_min": 9.0,
+            "dosagem_min": 5.0,
+            "ida_min": 18.0,
+            "slump_min": 4.0,
+            "descarga_min": 14.0,
+            "lavagem_min": 8.0,
+            "volta_min": 16.0
+          },
+          "restricoes": {
+            "com_bomba": false,
+            "max_bts_frente": 1,
+            "max_bts_mistura": 1,
+            "max_bts_dosagem": 1,
+            "existe_intervalo_entre_misturas": false,
+            "intervalo_entre_misturas_min": 0.0,
+            "ultima_viagem_parcial_proporcional": true,
+            "permitir_primeira_viagem_customizada": false,
+            "volume_primeira_viagem_m3": null,
+            "alocacao_bts": "dedicadas"
+          }
+        }
+      ]
+    }
+  ]
+}
