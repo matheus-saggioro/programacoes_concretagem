@@ -53,6 +53,7 @@ class SequencingContext:
     enabled: bool
     ordered_ids_by_group: dict[str, list[str]]
     active_id_by_group: dict[str, str | None]
+    progressive_trip_limit_by_group: dict[str, int]
 
 
 def validar_concretagens(concretagens: Iterable[Concretagem]) -> None:
@@ -614,7 +615,7 @@ def _identify_bottlenecks(
             (_resource_utilization(front.recurso) for front in fronts.values() if front.categoria == "frente"),
             default=0.0,
         ),
-        "número insuficiente de BTs": max(
+        "Frota de BTs": max(
             (_fleet_utilization(fleet, trips) for fleet in fleets.values()),
             default=0.0,
         ),
@@ -673,7 +674,7 @@ def _generate_premissas(
         )
         prazo = format_clock(concretagem.prazo_datetime(base_date), base_date)
         premissas.append(
-            f"{concretagem.nome_programacao}: início {concretagem.inicio_primeira_mistura.strftime('%H:%M')}, "
+            f"{concretagem.nome_programacao}: início {format_clock(concretagem.inicio_datetime(base_date), base_date)}, "
             f"prazo {prazo}, descarga via {descarga}, {alocacao}, "
             f"capacidade da BT {round_minutes(concretagem.capacidade_bt_m3)} m³."
         )
@@ -706,6 +707,9 @@ def _generate_premissas(
 def _build_sequencing_context(
     concretagens: Iterable[Concretagem],
     sequenciar_por_prioridade: bool,
+    base_date: date,
+    bt_counts: dict[str, int],
+    liberar_bt_compartilhada_parcialmente: bool,
 ) -> SequencingContext:
     concretagens = list(concretagens)
     if not sequenciar_por_prioridade:
@@ -713,6 +717,7 @@ def _build_sequencing_context(
             enabled=False,
             ordered_ids_by_group={},
             active_id_by_group={},
+            progressive_trip_limit_by_group={},
         )
 
     members_by_group: dict[str, list[Concretagem]] = defaultdict(list)
@@ -721,24 +726,31 @@ def _build_sequencing_context(
 
     ordered_ids_by_group: dict[str, list[str]] = {}
     active_id_by_group: dict[str, str | None] = {}
+    progressive_trip_limit_by_group: dict[str, int] = {}
     for group_key, members in members_by_group.items():
         if len(members) <= 1:
             continue
         ordered = sorted(
             members,
             key=lambda item: (
-                item.inicio_primeira_mistura,
+                item.inicio_datetime(base_date),
                 _priority_sort_value(item.prioridade),
                 item.ordem,
             ),
         )
         ordered_ids_by_group[group_key] = [item.id for item in ordered]
         active_id_by_group[group_key] = None
+        if (
+            liberar_bt_compartilhada_parcialmente
+            and any(item.restricoes.alocacao_bts == "compartilhadas" for item in members)
+        ):
+            progressive_trip_limit_by_group[group_key] = max(1, int(bt_counts.get(group_key, 1)))
 
     return SequencingContext(
         enabled=bool(ordered_ids_by_group),
         ordered_ids_by_group=ordered_ids_by_group,
         active_id_by_group=active_id_by_group,
+        progressive_trip_limit_by_group=progressive_trip_limit_by_group,
     )
 
 
@@ -749,6 +761,24 @@ def _resolve_group_active_concretagem(
     next_trip_index: dict[str, int],
 ) -> str | None:
     if not sequencing.enabled or group_key not in sequencing.ordered_ids_by_group:
+        return None
+
+    progressive_limit = sequencing.progressive_trip_limit_by_group.get(group_key)
+    if progressive_limit is not None:
+        ordered_ids = sequencing.ordered_ids_by_group[group_key]
+        for concretagem_id in ordered_ids[:-1]:
+            launched = next_trip_index[concretagem_id]
+            threshold = len(trips_by_scenario[concretagem_id])
+            if launched < threshold:
+                sequencing.active_id_by_group[group_key] = concretagem_id
+                return concretagem_id
+
+        for concretagem_id in reversed(ordered_ids):
+            if next_trip_index[concretagem_id] < len(trips_by_scenario[concretagem_id]):
+                sequencing.active_id_by_group[group_key] = concretagem_id
+                return concretagem_id
+
+        sequencing.active_id_by_group[group_key] = None
         return None
 
     active_id = sequencing.active_id_by_group.get(group_key)
@@ -902,6 +932,7 @@ def _suggest_bt_counts_for_continuity(
     bt_counts: dict[str, int],
     sequenciar_por_prioridade: bool,
     base_date: date,
+    liberar_bt_compartilhada_parcialmente: bool,
 ) -> dict[str, int]:
     groups_with_continuity = {
         item.grupo_bt
@@ -934,6 +965,7 @@ def _suggest_bt_counts_for_continuity(
                     base_date=base_date,
                     automatico=False,
                     sequenciar_por_prioridade=sequenciar_por_prioridade,
+                    liberar_bt_compartilhada_parcialmente=liberar_bt_compartilhada_parcialmente,
                     include_recommendations=False,
                 )
                 cached_results[cache_key] = candidate_result
@@ -980,6 +1012,8 @@ def _build_summary(
                 "local": concretagem.local,
                 "elemento_frente": concretagem.elemento_frente,
                 "inicio_primeira_mistura": concretagem.inicio_primeira_mistura,
+                "inicio_primeira_mistura_raw": concretagem.inicio_datetime(base_date),
+                "inicio_primeira_mistura_offset_dias": concretagem.inicio_primeira_mistura_offset_dias,
                 "prioridade": concretagem.prioridade,
                 "volume_total_m3": concretagem.volume_total_m3,
                 "capacidade_bt_m3": concretagem.capacidade_bt_m3,
@@ -1055,7 +1089,7 @@ def _build_recommendations(
         recomendacoes.append(
             f"A frente de descarga está limitando o cenário. Avalie elevar a simultaneidade acima de {max_frente} BT(s)."
         )
-    elif gargalo == "número insuficiente de BTs":
+    elif gargalo == "Frota de BTs":
         recomendacoes.append(
             "Aumentar a quantidade de BTs disponíveis para a frente pode reduzir o prazo total."
         )
@@ -1101,6 +1135,7 @@ def _simulate_with_bt_counts(
     base_date: date,
     automatico: bool = False,
     sequenciar_por_prioridade: bool = False,
+    liberar_bt_compartilhada_parcialmente: bool = False,
     extra_warnings: list[str] | None = None,
     include_recommendations: bool = True,
 ) -> ResultadoCalculo:
@@ -1118,7 +1153,13 @@ def _simulate_with_bt_counts(
     if extra_warnings:
         warnings.extend(extra_warnings)
     fleets = _build_fleets(ordered_groups, bt_group_labels, bt_counts, data_base)
-    sequencing = _build_sequencing_context(concretagens, sequenciar_por_prioridade)
+    sequencing = _build_sequencing_context(
+        concretagens,
+        sequenciar_por_prioridade,
+        data_base,
+        bt_counts,
+        liberar_bt_compartilhada_parcialmente,
+    )
 
     next_trip_index = {concretagem.id: 0 for concretagem in concretagens}
     all_trips: list[Viagem] = []
@@ -1340,6 +1381,18 @@ def _simulate_with_bt_counts(
         all_trips,
     )
     gargalo = gargalo_por_espera if gargalo_por_espera != "sem espera" else recurso_mais_ocupado
+    premissas = _generate_premissas(
+        concretagens,
+        bt_counts,
+        bt_group_labels,
+        sequencing.enabled,
+        data_base,
+    )
+    if sequencing.progressive_trip_limit_by_group:
+        premissas.append(
+            "Para BTs compartilhadas com sequenciamento por prioridade, as próximas programações só iniciam após o esgotamento das cargas previstas da prioridade atual; a partir daí, as BTs retornadas passam a alimentar a prioridade seguinte."
+        )
+
     result = ResultadoCalculo(
         concretagens=concretagens,
         viagens=sorted(
@@ -1365,13 +1418,7 @@ def _simulate_with_bt_counts(
         prazo_por_cenario=prazo_por_cenario,
         termino_ultima_descarga=termino_ultima_descarga,
         termino_ultima_viagem=termino_ultima_viagem,
-        premissas=_generate_premissas(
-            concretagens,
-            bt_counts,
-            bt_group_labels,
-            sequencing.enabled,
-            data_base,
-        ),
+        premissas=premissas,
         data_base=data_base,
         warnings=warnings,
         automatico=automatico,
@@ -1387,6 +1434,7 @@ def _simulate_with_bt_counts(
             bt_counts,
             sequenciar_por_prioridade,
             data_base,
+            liberar_bt_compartilhada_parcialmente,
         )
         for resumo in result.resumo:
             sugerida = continuidade_bt_sugerida.get(
@@ -1418,6 +1466,7 @@ def simular_ciclo_bt(
     concretagens: Iterable[Concretagem],
     base_date: date,
     sequenciar_por_prioridade: bool = False,
+    liberar_bt_compartilhada_parcialmente: bool = False,
 ) -> ResultadoCalculo:
     concretagens = list(concretagens)
     bt_counts, _, warnings = _resolve_fixed_bt_counts(concretagens)
@@ -1427,6 +1476,7 @@ def simular_ciclo_bt(
         base_date=base_date,
         automatico=False,
         sequenciar_por_prioridade=sequenciar_por_prioridade,
+        liberar_bt_compartilhada_parcialmente=liberar_bt_compartilhada_parcialmente,
         extra_warnings=warnings,
     )
 
@@ -1445,6 +1495,7 @@ def calcular_dimensionamento_minimo(
     base_date: date,
     max_total_bts: int = 20,
     sequenciar_por_prioridade: bool = False,
+    liberar_bt_compartilhada_parcialmente: bool = False,
 ) -> ResultadoCalculo:
     concretagens = list(concretagens)
     validar_concretagens(concretagens)
@@ -1471,6 +1522,7 @@ def calcular_dimensionamento_minimo(
                     base_date=base_date,
                     automatico=True,
                     sequenciar_por_prioridade=sequenciar_por_prioridade,
+                    liberar_bt_compartilhada_parcialmente=liberar_bt_compartilhada_parcialmente,
                     include_recommendations=False,
                 )
                 cached_results[cache_key] = result
@@ -1493,6 +1545,7 @@ def calcular_dimensionamento_minimo(
                     base_date=base_date,
                     automatico=True,
                     sequenciar_por_prioridade=sequenciar_por_prioridade,
+                    liberar_bt_compartilhada_parcialmente=liberar_bt_compartilhada_parcialmente,
                     include_recommendations=True,
                 )
                 final_result.dimensionamento_encontrado = True
@@ -1507,6 +1560,7 @@ def calcular_dimensionamento_minimo(
         base_date=base_date,
         automatico=True,
         sequenciar_por_prioridade=sequenciar_por_prioridade,
+        liberar_bt_compartilhada_parcialmente=liberar_bt_compartilhada_parcialmente,
         include_recommendations=True,
     )
     best_result.dimensionamento_encontrado = False

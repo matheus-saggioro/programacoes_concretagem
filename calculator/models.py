@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from calculator.utils import (
     bt_group_key,
     parse_time_value,
-    resolve_deadline_datetime,
     combine_date_and_time,
 )
 
@@ -69,6 +68,7 @@ class Concretagem:
     capacidade_bt_m3: float
     numero_bts_fixo: int | None
     inicio_primeira_mistura: time
+    inicio_primeira_mistura_offset_dias: int
     prazo_limite_descarga: time | None
     ciclo: Ciclo
     restricoes: Restricoes
@@ -76,14 +76,19 @@ class Concretagem:
     ordem: int = 0
 
     def inicio_datetime(self, base_date: date) -> datetime:
-        return combine_date_and_time(base_date, self.inicio_primeira_mistura)
+        return combine_date_and_time(
+            base_date + timedelta(days=int(self.inicio_primeira_mistura_offset_dias or 0)),
+            self.inicio_primeira_mistura,
+        )
 
     def prazo_datetime(self, base_date: date) -> datetime | None:
-        return resolve_deadline_datetime(
-            base_date,
-            self.inicio_primeira_mistura,
-            self.prazo_limite_descarga,
-        )
+        if self.prazo_limite_descarga is None:
+            return None
+        start_dt = self.inicio_datetime(base_date)
+        deadline_dt = combine_date_and_time(start_dt.date(), self.prazo_limite_descarga)
+        if deadline_dt < start_dt:
+            deadline_dt += timedelta(days=1)
+        return deadline_dt
 
     @property
     def grupo_bt(self) -> str:
@@ -107,6 +112,9 @@ class Concretagem:
             capacidade_bt_m3=float(data.get("capacidade_bt_m3", 0.0)),
             numero_bts_fixo=int(numero_bts) if numero_bts not in (None, "", 0) else None,
             inicio_primeira_mistura=parse_time_value(data.get("inicio_primeira_mistura")) or time(7, 0),
+            inicio_primeira_mistura_offset_dias=max(
+                0, int(data.get("inicio_primeira_mistura_offset_dias", 0) or 0)
+            ),
             prioridade=max(0, int(data.get("prioridade", 0) or 0)),
             prazo_limite_descarga=parse_time_value(data.get("prazo_limite_descarga")),
             ciclo=Ciclo(
@@ -162,6 +170,7 @@ class Concretagem:
             "capacidade_bt_m3": self.capacidade_bt_m3,
             "numero_bts_fixo": self.numero_bts_fixo,
             "inicio_primeira_mistura": self.inicio_primeira_mistura.strftime("%H:%M"),
+            "inicio_primeira_mistura_offset_dias": self.inicio_primeira_mistura_offset_dias,
             "prioridade": self.prioridade,
             "prazo_limite_descarga": (
                 self.prazo_limite_descarga.strftime("%H:%M")

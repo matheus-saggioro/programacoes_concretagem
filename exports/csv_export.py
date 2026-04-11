@@ -28,6 +28,9 @@ def exportar_programacao_cenario_csv(record: dict) -> bytes:
                 "cenario_sequenciar_por_prioridade": record.get(
                     "sequenciar_por_prioridade", False
                 ),
+                "cenario_liberar_bt_compartilhada_parcialmente": record.get(
+                    "liberar_bt_compartilhada_parcialmente", False
+                ),
                 "programacao_ordem": ordem,
                 "programacao_id": payload.get("id", ""),
                 "programacao_nome": payload.get("nome_programacao", ""),
@@ -40,6 +43,9 @@ def exportar_programacao_cenario_csv(record: dict) -> bytes:
                 "programacao_capacidade_bt_m3": payload.get("capacidade_bt_m3", ""),
                 "programacao_numero_bts_fixo": payload.get("numero_bts_fixo", ""),
                 "programacao_inicio_primeira_mistura": payload.get("inicio_primeira_mistura", ""),
+                "programacao_inicio_primeira_mistura_offset_dias": payload.get(
+                    "inicio_primeira_mistura_offset_dias", 0
+                ),
                 "programacao_prioridade": payload.get("prioridade", 0),
                 "programacao_prazo_limite_descarga": payload.get("prazo_limite_descarga", ""),
                 "ciclo_mistura_min": ciclo.get("mistura_min", ""),
@@ -94,6 +100,7 @@ def importar_programacao_cenario_csv(content: bytes) -> dict:
         "cenario_calc_mode",
         "cenario_max_total_bts",
         "cenario_sequenciar_por_prioridade",
+        "cenario_liberar_bt_compartilhada_parcialmente",
         "programacao_ordem",
         "programacao_id",
         "programacao_nome",
@@ -165,6 +172,9 @@ def importar_programacao_cenario_csv(content: bytes) -> dict:
                 if str(row["programacao_numero_bts_fixo"]).strip()
                 else 0,
                 "inicio_primeira_mistura": str(row["programacao_inicio_primeira_mistura"]).strip(),
+                "inicio_primeira_mistura_offset_dias": int(
+                    float(row.get("programacao_inicio_primeira_mistura_offset_dias", 0) or 0)
+                ),
                 "prioridade": int(float(row["programacao_prioridade"])),
                 "prazo_limite_descarga": as_optional_text(row["programacao_prazo_limite_descarga"]),
                 "ciclo": {
@@ -216,5 +226,8 @@ def importar_programacao_cenario_csv(content: bytes) -> dict:
         "calc_mode": str(first["cenario_calc_mode"]).strip() or "fixo",
         "max_total_bts": int(float(first["cenario_max_total_bts"])),
         "sequenciar_por_prioridade": as_bool(first["cenario_sequenciar_por_prioridade"]),
+        "liberar_bt_compartilhada_parcialmente": as_bool(
+            first["cenario_liberar_bt_compartilhada_parcialmente"]
+        ),
         "payloads": payloads,
     }

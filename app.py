@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import re
 from copy import deepcopy
-from datetime import date, time
-from io import BytesIO
+from datetime import date, datetime, timedelta, time
 from pathlib import Path
 
 import pandas as pd
@@ -12,7 +11,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from calculator.engine import calcular_dimensionamento_minimo, simular_ciclo_bt
-from calculator.gantt import gerar_disponibilidade_bt, gerar_gantt, gerar_tabela_disponibilidade_bt
+from calculator.gantt import (
+    gerar_disponibilidade_bt_interativa,
+    gerar_gantt_interativo,
+    gerar_tabela_disponibilidade_bt,
+)
 from calculator.models import Concretagem
 from calculator.utils import format_clock, parse_time_value, round_minutes, safe_identifier
 from exports.csv_export import (
@@ -20,11 +23,19 @@ from exports.csv_export import (
     exportar_programacao_cenario_csv,
     importar_programacao_cenario_csv,
 )
+from exports.pdf_export import exportar_relatorio_operacional_pdf
 
 
 BASE_DIR = Path(__file__).resolve().parent
 SAVED_SCENARIOS_PATH = BASE_DIR / "sample_data" / "saved_scenarios.json"
 TURNO_OPTIONS = ["Diurno", "Noturno"]
+INICIO_DIA_OPTIONS = [0, 1, 2]
+INICIO_DIA_LABELS = {
+    0: "D",
+    1: "D+1",
+    2: "D+2",
+}
+CALCULATION_SIGNATURE_VERSION = "2026-04-08-priority-shared-v3"
 
 
 st.set_page_config(
@@ -59,6 +70,9 @@ def _inject_styles() -> None:
             background: rgba(255, 255, 255, 0.1);
             margin: 1.1rem 0 1.4rem 0;
         }
+        .main-section-gap {
+            height: 0.95rem;
+        }
         .active-scenario-box {
             border-radius: 12px;
             min-height: 40px;
@@ -76,10 +90,11 @@ def _inject_styles() -> None:
         }
         .result-status-card {
             border: 1px solid rgba(255, 255, 255, 0.14);
+            border-left: 4px solid rgba(255, 255, 255, 0.18);
             border-radius: 12px;
             padding: 0.8rem 0.9rem;
             min-height: 92px;
-            background: rgba(255, 255, 255, 0.04);
+            background: #1e2633;
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
         }
         .result-status-card .label {
@@ -101,20 +116,16 @@ def _inject_styles() -> None:
             color: rgba(255, 255, 255, 0.88);
         }
         .result-status-card.ok {
-            border-color: rgba(76, 175, 80, 0.42);
-            background: rgba(25, 60, 34, 0.9);
+            border-left-color: rgba(76, 175, 80, 0.82);
         }
         .result-status-card.warn {
-            border-color: rgba(255, 167, 38, 0.42);
-            background: rgba(58, 40, 18, 0.92);
+            border-left-color: rgba(255, 167, 38, 0.82);
         }
         .result-status-card.bad {
-            border-color: rgba(239, 83, 80, 0.42);
-            background: rgba(58, 24, 28, 0.92);
+            border-left-color: rgba(239, 83, 80, 0.82);
         }
         .result-status-card.info {
-            border-color: rgba(100, 181, 246, 0.42);
-            background: rgba(23, 42, 64, 0.92);
+            border-left-color: rgba(100, 181, 246, 0.82);
         }
         .result-kicker {
             font-size: 0.84rem;
@@ -238,6 +249,21 @@ def _inject_styles() -> None:
             border-color: #2f7a46;
             color: #ffffff;
         }
+        div[data-baseweb="select"] [data-baseweb="tag"] {
+            max-width: none !important;
+            width: auto !important;
+            min-width: max-content !important;
+            flex: 0 0 auto !important;
+            overflow: visible !important;
+        }
+        div[data-baseweb="select"] [data-baseweb="tag"] * {
+            max-width: none !important;
+        }
+        div[data-baseweb="select"] [data-baseweb="tag"] span {
+            overflow: visible !important;
+            text-overflow: unset !important;
+            white-space: nowrap !important;
+        }
         @media (prefers-color-scheme: light) {
             .section-helper,
             .result-kicker,
@@ -246,6 +272,7 @@ def _inject_styles() -> None:
             }
             .result-status-card {
                 border-color: rgba(15, 23, 42, 0.12);
+                border-left-color: rgba(148, 163, 184, 0.9);
                 background: #f7f8fa;
                 box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
             }
@@ -259,20 +286,16 @@ def _inject_styles() -> None:
                 color: rgba(17, 24, 39, 0.76);
             }
             .result-status-card.ok {
-                border-color: rgba(46, 125, 50, 0.34);
-                background: #edf7ee;
+                border-left-color: rgba(46, 125, 50, 0.8);
             }
             .result-status-card.warn {
-                border-color: rgba(180, 83, 9, 0.34);
-                background: #fff4e5;
+                border-left-color: rgba(180, 83, 9, 0.8);
             }
             .result-status-card.bad {
-                border-color: rgba(185, 28, 28, 0.30);
-                background: #fdecec;
+                border-left-color: rgba(185, 28, 28, 0.8);
             }
             .result-status-card.info {
-                border-color: rgba(37, 99, 235, 0.28);
-                background: #edf5ff;
+                border-left-color: rgba(37, 99, 235, 0.78);
             }
             .result-box {
                 border-color: rgba(15, 23, 42, 0.12);
@@ -287,21 +310,28 @@ def _inject_styles() -> None:
             }
         }
         @media (max-width: 768px) {
+            .block-container {
+                padding-left: 0.8rem !important;
+                padding-right: 0.8rem !important;
+                padding-top: 1rem !important;
+            }
             .stApp h1 {
-                font-size: 2rem !important;
+                font-size: 1.72rem !important;
                 line-height: 1.08;
             }
             .stApp h2 {
-                font-size: 1.45rem !important;
+                font-size: 1.28rem !important;
             }
             .stApp h3 {
-                font-size: 1.15rem !important;
+                font-size: 1.08rem !important;
             }
             .active-scenario-box {
                 min-height: unset;
                 line-height: 1.3;
                 align-items: flex-start;
                 flex-wrap: wrap;
+                font-size: 0.92rem;
+                padding: 0.45rem 0.75rem;
             }
             .section-helper,
             .scenario-meta-preview,
@@ -311,11 +341,37 @@ def _inject_styles() -> None:
             }
             div[data-testid="stHorizontalBlock"] {
                 gap: 0.55rem !important;
+                row-gap: 0.55rem !important;
             }
             div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                 width: 100% !important;
                 min-width: 0 !important;
                 flex: 1 1 100% !important;
+            }
+            div[data-testid="stExpander"] details {
+                border-radius: 12px;
+            }
+            div[data-testid="stExpander"] summary {
+                padding-top: 0.15rem !important;
+                padding-bottom: 0.15rem !important;
+            }
+            div[data-testid="stExpander"] summary p {
+                font-size: 0.96rem !important;
+            }
+            div[data-testid="stTextInput"] label p,
+            div[data-testid="stNumberInput"] label p,
+            div[data-testid="stDateInput"] label p,
+            div[data-testid="stTimeInput"] label p,
+            div[data-testid="stSelectbox"] label p,
+            div[data-testid="stMultiSelect"] label p,
+            div[data-testid="stCheckbox"] label p,
+            div[data-testid="stRadio"] label p {
+                font-size: 0.92rem !important;
+            }
+            div[data-testid="stButton"] button,
+            div[data-testid="stDownloadButton"] button {
+                min-height: 2.7rem;
+                font-size: 0.95rem !important;
             }
             div[data-testid="stButton"] button {
                 width: 100%;
@@ -332,12 +388,16 @@ def _inject_styles() -> None:
                 min-height: unset;
             }
             .result-status-card .value {
-                font-size: 1.22rem;
+                font-size: 1.15rem;
             }
             .result-status-card .subvalue,
             .result-mini-card .subvalue,
             .result-linked-note .body {
                 font-size: 0.82rem;
+            }
+            .result-status-card .label,
+            .result-mini-card .label {
+                font-size: 0.74rem;
             }
             .result-mini-card .value {
                 font-size: 1.02rem;
@@ -346,6 +406,9 @@ def _inject_styles() -> None:
             .result-inline-note,
             .result-box {
                 margin-top: 0.45rem;
+            }
+            div[data-testid="stDataFrame"] {
+                overflow-x: auto;
             }
             div[data-baseweb="tab-list"] {
                 gap: 0.2rem !important;
@@ -358,8 +421,24 @@ def _inject_styles() -> None:
                 padding-right: 0.6rem !important;
                 min-width: max-content;
             }
+            button[data-baseweb="tab"] p {
+                font-size: 0.92rem !important;
+            }
+            div[data-baseweb="select"] [data-baseweb="tag"] {
+                max-width: 100% !important;
+                width: auto !important;
+                min-width: 0 !important;
+                flex: 1 1 auto !important;
+            }
+            div[data-baseweb="select"] [data-baseweb="tag"] span {
+                white-space: normal !important;
+                line-height: 1.25 !important;
+            }
             iframe[title^="streamlit"] {
                 max-width: 100%;
+            }
+            div[data-testid="stPlotlyChart"] {
+                overflow-x: hidden;
             }
         }
         </style>
@@ -407,7 +486,7 @@ def _render_subsection_heading(title: str, helper_text: str) -> None:
     st.caption(helper_text)
 
 
-def _apply_detail_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
+def _apply_detail_filters(dataframe: pd.DataFrame, key_prefix: str = "base") -> pd.DataFrame:
     filtered = dataframe.copy()
     with st.expander("Filtros da tabela", expanded=False):
         st.caption("Refine o detalhamento por programação, BT, viagem, etapa ou busca textual.")
@@ -418,7 +497,7 @@ def _apply_detail_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
             programacoes = c1.multiselect(
                 "Programação",
                 options=sorted(filtered["Programação"].dropna().unique().tolist()),
-                key="detalhamento_filter_programacao",
+                key=f"{key_prefix}_detalhamento_filter_programacao",
             )
 
         bts = []
@@ -426,7 +505,7 @@ def _apply_detail_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
             bts = c2.multiselect(
                 "BT",
                 options=sorted(filtered["BT"].dropna().unique().tolist()),
-                key="detalhamento_filter_bt",
+                key=f"{key_prefix}_detalhamento_filter_bt",
             )
 
         viagens = []
@@ -434,7 +513,7 @@ def _apply_detail_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
             viagens = c3.multiselect(
                 "Viagem",
                 options=sorted(filtered["Viagem"].dropna().unique().tolist()),
-                key="detalhamento_filter_viagem",
+                key=f"{key_prefix}_detalhamento_filter_viagem",
             )
 
         etapas = []
@@ -442,14 +521,14 @@ def _apply_detail_filters(dataframe: pd.DataFrame) -> pd.DataFrame:
             etapas = c4.multiselect(
                 "Etapa",
                 options=sorted(filtered["Etapa"].dropna().unique().tolist()),
-                key="detalhamento_filter_etapa",
+                key=f"{key_prefix}_detalhamento_filter_etapa",
             )
 
         busca_textual = st.text_input(
             "Busca textual",
-            value=st.session_state.get("detalhamento_filter_busca", ""),
+            value=st.session_state.get(f"{key_prefix}_detalhamento_filter_busca", ""),
             placeholder="Ex.: descarga, bomba, V03, D20 P6, aguardando...",
-            key="detalhamento_filter_busca",
+            key=f"{key_prefix}_detalhamento_filter_busca",
         ).strip()
 
         if programacoes:
@@ -574,6 +653,10 @@ def _format_priority_label(prioridade: int | None) -> str:
     return f"P{prioridade}" if prioridade > 0 else "Sem prioridade"
 
 
+def _format_inicio_offset_label(offset_days: int | None) -> str:
+    return INICIO_DIA_LABELS.get(int(offset_days or 0), "D")
+
+
 def _current_scenario_label() -> str:
     scenario_name = st.session_state.get("current_scenario_name", "").strip()
     return _build_scenario_label(
@@ -589,9 +672,6 @@ def _render_active_scenario_box() -> None:
             "<div class='active-scenario-box' "
             "style='background:#1f5f33;border:1px solid #2f7a46;"
             "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);'>"
-            "<span style='display:inline;color:#c9f2d0;font-size:0.76rem;font-weight:700;"
-            "margin-right:0.5rem;text-transform:uppercase;letter-spacing:0.04em;'>"
-            "Cenário ativo:</span>"
             f"<span style='color:#ffffff;font-weight:700;'>{_current_scenario_label()}</span>"
             "</div>"
         ),
@@ -602,7 +682,7 @@ def _render_active_scenario_box() -> None:
 def _default_payload(index: int) -> dict:
     return {
         "id": f"concretagem-{index}",
-        "nome_programacao": f"Programação {index}",
+        "nome_programacao": f"Frente {index}",
         "local": "Serra das Araras",
         "elemento_frente": f"Frente {index}",
         "usina": "Usina Serra",
@@ -612,16 +692,17 @@ def _default_payload(index: int) -> dict:
         "capacidade_bt_m3": 8.0,
         "numero_bts_fixo": 0,
         "inicio_primeira_mistura": "07:00",
+        "inicio_primeira_mistura_offset_dias": 0,
         "prioridade": 0,
         "prazo_limite_descarga": None,
         "ciclo": {
             "mistura_min": 10.0,
-            "dosagem_min": 6.0,
-            "ida_min": 25.0,
-            "slump_min": 5.0,
-            "descarga_min": 18.0,
+            "dosagem_min": 20.0,
+            "ida_min": 10.0,
+            "slump_min": 10.0,
+            "descarga_min": 15.0,
             "lavagem_min": 10.0,
-            "volta_min": 22.0,
+            "volta_min": 10.0,
         },
         "restricoes": {
             "com_bomba": True,
@@ -646,6 +727,149 @@ def _default_saved_scenarios_file() -> dict:
 
 def _widget_key(index: int, name: str) -> str:
     return f"scenario_{index}_{name}"
+
+
+def _time_text_widget_key(base_key: str) -> str:
+    return f"{base_key}__text"
+
+
+def _time_text_sync_key(base_key: str) -> str:
+    return f"{base_key}__text_synced"
+
+
+def _time_text_error_key(base_key: str) -> str:
+    return f"{base_key}__text_error"
+
+
+def _format_time_text(value: time | None) -> str:
+    if value is None:
+        return ""
+    return value.replace(second=0, microsecond=0).strftime("%H:%M")
+
+
+def _parse_time_text_input(raw_value: str) -> time | None:
+    raw_value = str(raw_value or "").strip()
+    if not raw_value:
+        return None
+
+    try:
+        parsed_value = parse_time_value(raw_value)
+    except ValueError:
+        parsed_value = None
+    if parsed_value is not None:
+        return parsed_value.replace(second=0, microsecond=0)
+
+    digits_only = "".join(char for char in raw_value if char.isdigit())
+    if len(digits_only) == 3:
+        candidate = f"0{digits_only[0]}:{digits_only[1:]}"
+    elif len(digits_only) == 4:
+        candidate = f"{digits_only[:2]}:{digits_only[2:]}"
+    else:
+        return None
+
+    try:
+        parsed_value = parse_time_value(candidate)
+    except ValueError:
+        return None
+    return parsed_value.replace(second=0, microsecond=0)
+
+
+def _sync_time_text_state(base_key: str, value: time | None, *, force: bool = False) -> None:
+    text_key = _time_text_widget_key(base_key)
+    sync_key = _time_text_sync_key(base_key)
+    error_key = _time_text_error_key(base_key)
+    formatted = _format_time_text(value)
+    current_text = st.session_state.get(text_key)
+    previous_synced = st.session_state.get(sync_key)
+    if force or text_key not in st.session_state or current_text == previous_synced:
+        st.session_state[text_key] = formatted
+        st.session_state[sync_key] = formatted
+        st.session_state[error_key] = ""
+
+
+def _commit_time_text_value(base_key: str) -> None:
+    text_key = _time_text_widget_key(base_key)
+    sync_key = _time_text_sync_key(base_key)
+    error_key = _time_text_error_key(base_key)
+    raw_value = str(st.session_state.get(text_key, "")).strip()
+    parsed_value = _parse_time_text_input(raw_value)
+    if parsed_value is None:
+        st.session_state[error_key] = "Use HH:MM, HMM ou HHMM."
+        return
+    parsed_value = parsed_value.replace(second=0, microsecond=0)
+    formatted = _format_time_text(parsed_value)
+    st.session_state[base_key] = parsed_value
+    st.session_state[text_key] = formatted
+    st.session_state[sync_key] = formatted
+    st.session_state[error_key] = ""
+
+
+def _render_time_text_input(
+    label: str,
+    base_key: str,
+    *,
+    disabled: bool = False,
+    help_text: str | None = None,
+) -> None:
+    st.text_input(
+        label,
+        key=_time_text_widget_key(base_key),
+        placeholder="HH:MM",
+        disabled=disabled,
+        help=help_text,
+        on_change=_commit_time_text_value,
+        args=(base_key,),
+    )
+    error_message = st.session_state.get(_time_text_error_key(base_key), "")
+    if error_message:
+        st.caption(error_message)
+
+
+def _program_display_name(index: int) -> str:
+    payloads = st.session_state.get("scenario_payloads", [])
+    payload = payloads[index - 1] if 0 < index <= len(payloads) else {}
+    return str(
+        st.session_state.get(
+            _widget_key(index, "nome_programacao"),
+            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
+        )
+    ).strip() or f"Programação {index}"
+
+
+def _current_time_text(base_key: str) -> str:
+    raw_value = st.session_state.get(_time_text_widget_key(base_key))
+    if raw_value is None:
+        raw_value = _format_time_text(st.session_state.get(base_key))
+    return str(raw_value or "").strip()
+
+
+def _collect_calculation_time_errors(selected_program_numbers: list[int] | None = None) -> list[str]:
+    payloads = st.session_state.get("scenario_payloads", [])
+    if not payloads:
+        return []
+
+    if selected_program_numbers is None:
+        program_numbers = list(range(1, len(payloads) + 1))
+    else:
+        program_numbers = [int(item) for item in selected_program_numbers if 0 < int(item) <= len(payloads)]
+
+    errors: list[str] = []
+    for index in program_numbers:
+        program_name = _program_display_name(index)
+
+        inicio_key = _widget_key(index, "inicio_primeira_mistura")
+        inicio_text = _current_time_text(inicio_key)
+        if not inicio_text or _parse_time_text_input(inicio_text) is None:
+            errors.append(f"{program_name}: corrija o horário de início da 1ª mistura.")
+
+        usar_prazo = bool(st.session_state.get(_widget_key(index, "usar_prazo"), False))
+        if usar_prazo:
+            prazo_key = _widget_key(index, "prazo_limite_descarga")
+            prazo_text = _current_time_text(prazo_key)
+            if not prazo_text or _parse_time_text_input(prazo_text) is None:
+                errors.append(f"{program_name}: corrija o horário do prazo de descarga.")
+
+    return errors
 
 
 def _ensure_saved_scenarios_file() -> None:
@@ -770,22 +994,53 @@ def _next_duplicate_identity(
         copy_number += 1
 
 
+def _next_scenario_copy_name(
+    base_name: str,
+    scenario_date: date,
+    turno: str,
+    scenarios: list[dict],
+) -> str:
+    clean_name = _normalize_duplicate_name(base_name) or "Cenário"
+    used_labels = {
+        item.get("label", "")
+        for item in scenarios
+        if item.get("date") == scenario_date.isoformat() and item.get("turno") == turno
+    }
+
+    first_candidate = f"{clean_name} (cópia)"
+    if _build_scenario_label(first_candidate, scenario_date, turno) not in used_labels:
+        return first_candidate
+
+    copy_number = 1
+    while True:
+        candidate = f"{clean_name} (cópia {copy_number})"
+        if _build_scenario_label(candidate, scenario_date, turno) not in used_labels:
+            return candidate
+        copy_number += 1
+
+
 def _apply_payloads(
     payloads: list[dict],
     mode: str | None = None,
     max_total_bts: int | None = None,
     sequenciar_por_prioridade: bool | None = None,
+    liberar_bt_compartilhada_parcialmente: bool | None = None,
 ) -> None:
     st.session_state.scenario_payloads = payloads
 
     for index, payload in enumerate(payloads, start=1):
         ciclo = payload.get("ciclo", {})
         restricoes = payload.get("restricoes", {})
-        st.session_state[_widget_key(index, "nome_programacao")] = payload.get(
-            "nome_programacao", f"Programação {index}"
+        nome_programacao = (
+            payload.get("elemento_frente")
+            or payload.get("nome_programacao")
+            or f"Frente {index}"
         )
+        st.session_state[_widget_key(index, "nome_programacao")] = nome_programacao
         st.session_state[_widget_key(index, "local")] = payload.get("local", "")
-        st.session_state[_widget_key(index, "elemento_frente")] = payload.get("elemento_frente", "")
+        st.session_state[_widget_key(index, "elemento_frente")] = (
+            payload.get("elemento_frente") or nome_programacao
+        )
         st.session_state[_widget_key(index, "usina")] = payload.get("usina", "")
         st.session_state[_widget_key(index, "tipo_cimento")] = payload.get("tipo_cimento", "")
         st.session_state[_widget_key(index, "observacoes")] = payload.get("observacoes", "")
@@ -799,11 +1054,24 @@ def _apply_payloads(
         st.session_state[_widget_key(index, "inicio_primeira_mistura")] = parse_time_value(
             payload.get("inicio_primeira_mistura")
         ) or time(7, 0)
+        _sync_time_text_state(
+            _widget_key(index, "inicio_primeira_mistura"),
+            st.session_state[_widget_key(index, "inicio_primeira_mistura")],
+            force=True,
+        )
+        st.session_state[_widget_key(index, "inicio_primeira_mistura_offset_dias")] = max(
+            0, int(payload.get("inicio_primeira_mistura_offset_dias", 0) or 0)
+        )
         st.session_state[_widget_key(index, "prioridade")] = int(payload.get("prioridade", 0) or 0)
         st.session_state[_widget_key(index, "usar_prazo")] = payload.get("prazo_limite_descarga") is not None
         st.session_state[_widget_key(index, "prazo_limite_descarga")] = parse_time_value(
             payload.get("prazo_limite_descarga")
         ) or time(12, 0)
+        _sync_time_text_state(
+            _widget_key(index, "prazo_limite_descarga"),
+            st.session_state[_widget_key(index, "prazo_limite_descarga")],
+            force=True,
+        )
 
         st.session_state[_widget_key(index, "mistura_min")] = float(ciclo.get("mistura_min", 0.0))
         st.session_state[_widget_key(index, "dosagem_min")] = float(ciclo.get("dosagem_min", 0.0))
@@ -857,6 +1125,10 @@ def _apply_payloads(
         st.session_state.max_total_bts = int(max_total_bts)
     if sequenciar_por_prioridade is not None:
         st.session_state.sequenciar_por_prioridade = bool(sequenciar_por_prioridade)
+    if liberar_bt_compartilhada_parcialmente is not None:
+        st.session_state.liberar_bt_compartilhada_parcialmente = bool(
+            liberar_bt_compartilhada_parcialmente
+        )
 
 
 def _ensure_defaults(index: int, payload: dict) -> None:
@@ -865,10 +1137,48 @@ def _ensure_defaults(index: int, payload: dict) -> None:
     _apply_payloads(st.session_state.scenario_payloads)
 
 
+def _program_widgets_ready(index: int) -> bool:
+    required_suffixes = [
+        "nome_programacao",
+        "elemento_frente",
+        "local",
+        "usina",
+        "observacoes",
+        "volume_total_m3",
+        "capacidade_bt_m3",
+        "numero_bts_fixo",
+        "inicio_primeira_mistura",
+        "inicio_primeira_mistura_offset_dias",
+        "prioridade",
+        "usar_prazo",
+        "prazo_limite_descarga",
+        "mistura_min",
+        "dosagem_min",
+        "ida_min",
+        "slump_min",
+        "descarga_min",
+        "lavagem_min",
+        "volta_min",
+        "com_bomba",
+        "max_bts_frente",
+        "max_bts_mistura",
+        "max_bts_dosagem",
+        "existe_intervalo_entre_misturas",
+        "intervalo_entre_misturas_min",
+        "existe_intervalo_maximo_entre_descargas",
+        "intervalo_maximo_entre_descargas_min",
+        "ultima_viagem_parcial_proporcional",
+        "permitir_primeira_viagem_customizada",
+        "volume_primeira_viagem_m3",
+        "alocacao_bts",
+    ]
+    return all(_widget_key(index, suffix) in st.session_state for suffix in required_suffixes)
+
+
 def _snapshot_payloads_from_state() -> list[dict]:
     payloads = []
     for index, payload in enumerate(st.session_state.scenario_payloads, start=1):
-        if _widget_key(index, "nome_programacao") in st.session_state:
+        if _program_widgets_ready(index):
             payloads.append(_read_payload_from_widgets(index))
         else:
             payloads.append(payload)
@@ -905,20 +1215,125 @@ def _build_current_scenario_record() -> dict:
         "calc_mode": st.session_state.calc_mode,
         "max_total_bts": int(st.session_state.max_total_bts),
         "sequenciar_por_prioridade": bool(st.session_state.sequenciar_por_prioridade),
+        "liberar_bt_compartilhada_parcialmente": bool(
+            st.session_state.liberar_bt_compartilhada_parcialmente
+        ),
         "payloads": payloads,
     }
 
 
+def _scenario_record_signature(record: dict) -> str:
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _reset_calculation_program_selection() -> None:
+    st.session_state.calc_selected_programs = []
+    st.session_state.calc_selected_programs_total = 0
+
+
+def _sync_calculation_program_selection(total_programs: int) -> list[int]:
+    previous_total = int(st.session_state.get("calc_selected_programs_total", 0) or 0)
+    current_selection = st.session_state.get("calc_selected_programs", [])
+    normalized = []
+    for item in current_selection:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= total_programs and value not in normalized:
+            normalized.append(value)
+
+    if (
+        previous_total > 0
+        and total_programs > previous_total
+        and normalized == list(range(1, previous_total + 1))
+    ):
+        normalized = list(range(1, total_programs + 1))
+
+    if total_programs > 0 and not normalized:
+        normalized = list(range(1, total_programs + 1))
+
+    st.session_state.calc_selected_programs = normalized
+    st.session_state.calc_selected_programs_total = total_programs
+    return normalized
+
+
+def _current_calculation_signature() -> str:
+    try:
+        payloads = _snapshot_payloads_from_state()
+    except Exception:
+        return ""
+    envelope = {
+        "version": CALCULATION_SIGNATURE_VERSION,
+        "date": st.session_state.get("current_scenario_date"),
+        "turno": st.session_state.get("current_scenario_turno", ""),
+        "name": st.session_state.get("current_scenario_name", "").strip(),
+        "calc_mode": st.session_state.get("calc_mode", "fixo"),
+        "max_total_bts": int(st.session_state.get("max_total_bts", 12)),
+        "sequenciar_por_prioridade": bool(st.session_state.get("sequenciar_por_prioridade", False)),
+        "liberar_bt_compartilhada_parcialmente": bool(
+            st.session_state.get("liberar_bt_compartilhada_parcialmente", False)
+        ),
+        "selected_programs": list(st.session_state.get("calc_selected_programs", [])),
+        "payloads": payloads,
+    }
+    return json.dumps(envelope, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _invalidate_stale_result_if_needed() -> None:
+    if st.session_state.get("resultado") is None:
+        return
+    current_signature = _current_calculation_signature()
+    last_signature = st.session_state.get("last_calculated_signature", "")
+    if current_signature and current_signature != last_signature:
+        st.session_state.resultado = None
+        st.session_state.resultado_reprogramado = None
+        st.session_state.reprogramacao_meta = None
+
+
+def _has_synced_base_result() -> bool:
+    if st.session_state.get("resultado") is None:
+        return False
+    current_signature = _current_calculation_signature()
+    last_signature = st.session_state.get("last_calculated_signature", "")
+    return bool(current_signature and last_signature and current_signature == last_signature)
+
+
+def _sync_reprogramming_visibility() -> None:
+    if _has_synced_base_result():
+        return
+    st.session_state.show_reprogramming_section = False
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
+
+
+def _reset_delete_confirmation_state() -> None:
+    st.session_state.confirm_delete_scenario = False
+    st.session_state.delete_target_scenario_id = ""
+    st.session_state.delete_target_scenario_label = ""
+    st.session_state.delete_target_previous_scenario_id = ""
+    st.session_state.delete_target_scenario_date = None
+    st.session_state.delete_target_scenario_turno = ""
+    st.session_state.delete_target_scenario_name = ""
+    st.session_state.pending_delete_preview_record = None
+
+
 def _apply_saved_scenario(record: dict) -> None:
     record = _normalize_scenario_record(record)
+    _reset_calculation_program_selection()
     _apply_payloads(
         record.get("payloads") or [_default_payload(1)],
         mode=record.get("calc_mode", "fixo"),
         max_total_bts=record.get("max_total_bts", 12),
         sequenciar_por_prioridade=record.get("sequenciar_por_prioridade", False),
+        liberar_bt_compartilhada_parcialmente=record.get(
+            "liberar_bt_compartilhada_parcialmente", False
+        ),
     )
     st.session_state.pending_focus_program_index = 0
     st.session_state.resultado = None
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
     _set_current_scenario_metadata(
         scenario_date=date.fromisoformat(record.get("date", date.today().isoformat())),
         turno=record.get("turno", "Diurno"),
@@ -926,6 +1341,8 @@ def _apply_saved_scenario(record: dict) -> None:
     )
     st.session_state.current_scenario_name = (record.get("name") or "").strip() or "Cenário"
     st.session_state.selected_saved_scenario_id = record.get("id", "")
+    st.session_state.last_saved_scenario_signature = _scenario_record_signature(record)
+    _reset_delete_confirmation_state()
     st.session_state.current_page = "planejamento"
 
 
@@ -957,8 +1374,29 @@ def _save_current_scenario() -> str:
     scenarios.sort(key=lambda item: (item.get("date", ""), item.get("turno", ""), item.get("label", "")))
     _write_saved_scenarios(scenarios)
     st.session_state.current_scenario_id = record["id"]
-    st.session_state.current_scenario_name = record["name"]
+    st.session_state.selected_saved_scenario_id = record["id"]
+    st.session_state.last_saved_scenario_signature = _scenario_record_signature(record)
     return record["id"]
+
+
+def _autosave_current_scenario_if_needed() -> None:
+    if st.session_state.get("current_page") != "planejamento":
+        return
+    if not _has_active_scenario():
+        return
+    if st.session_state.get("confirm_delete_scenario"):
+        return
+
+    try:
+        record = _build_current_scenario_record()
+    except ValueError:
+        return
+
+    signature = _scenario_record_signature(record)
+    if signature == st.session_state.get("last_saved_scenario_signature", ""):
+        return
+
+    _save_current_scenario()
 
 
 def _create_new_scenario() -> None:
@@ -972,13 +1410,18 @@ def _create_new_scenario() -> None:
         mode="fixo",
         max_total_bts=12,
         sequenciar_por_prioridade=False,
+        liberar_bt_compartilhada_parcialmente=False,
     )
+    _reset_calculation_program_selection()
     st.session_state.pending_focus_program_index = 0
     _set_current_scenario_metadata(scenario_date, turno, "")
     st.session_state.current_scenario_name = scenario_name
     saved_id = _save_current_scenario()
     st.session_state.selected_saved_scenario_id = saved_id
     st.session_state.resultado = None
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
+    _reset_delete_confirmation_state()
     st.session_state.current_page = "planejamento"
     st.session_state.toast_message = "Cenário criado com sucesso."
 
@@ -986,30 +1429,51 @@ def _create_new_scenario() -> None:
 def _clear_active_scenario() -> None:
     st.session_state.scenario_payloads = []
     st.session_state.resultado = None
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
     st.session_state.current_scenario_id = ""
     st.session_state.current_scenario_name = ""
     st.session_state.selected_saved_scenario_id = ""
+    st.session_state.last_saved_scenario_signature = ""
     st.session_state.pending_focus_program_index = None
+    _reset_calculation_program_selection()
+    _reset_delete_confirmation_state()
     st.session_state.current_page = "cenario"
 
 
 def _duplicate_saved_scenario(record: dict) -> None:
+    scenarios = _load_saved_scenarios()
+    scenario_date = date.fromisoformat(record.get("date", date.today().isoformat()))
+    turno = record.get("turno", "Diurno")
+    _reset_calculation_program_selection()
     _apply_payloads(
         record.get("payloads") or [_default_payload(1)],
         mode=record.get("calc_mode", "fixo"),
         max_total_bts=record.get("max_total_bts", 12),
         sequenciar_por_prioridade=record.get("sequenciar_por_prioridade", False),
+        liberar_bt_compartilhada_parcialmente=record.get(
+            "liberar_bt_compartilhada_parcialmente", False
+        ),
     )
     st.session_state.pending_focus_program_index = 0
     _set_current_scenario_metadata(
-        scenario_date=date.fromisoformat(record.get("date", date.today().isoformat())),
-        turno=record.get("turno", "Diurno"),
+        scenario_date=scenario_date,
+        turno=turno,
         scenario_id="",
     )
     base_name = (record.get("name") or "").strip() or "Cenário"
-    st.session_state.current_scenario_name = f"{_normalize_duplicate_name(base_name)} (cópia)"
-    st.session_state.selected_saved_scenario_id = ""
+    st.session_state.current_scenario_name = _next_scenario_copy_name(
+        base_name,
+        scenario_date,
+        turno,
+        scenarios,
+    )
+    saved_id = _save_current_scenario()
+    st.session_state.selected_saved_scenario_id = saved_id
     st.session_state.resultado = None
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
+    _reset_delete_confirmation_state()
     st.session_state.current_page = "planejamento"
     st.session_state.toast_message = (
         "Cenário duplicado. Ajuste os dados e salve para criar uma nova simulação."
@@ -1017,11 +1481,15 @@ def _duplicate_saved_scenario(record: dict) -> None:
 
 
 def _import_scenario_record(record: dict) -> None:
+    _reset_calculation_program_selection()
     _apply_payloads(
         record.get("payloads") or [_default_payload(1)],
         mode=record.get("calc_mode", "fixo"),
         max_total_bts=record.get("max_total_bts", 12),
         sequenciar_por_prioridade=record.get("sequenciar_por_prioridade", False),
+        liberar_bt_compartilhada_parcialmente=record.get(
+            "liberar_bt_compartilhada_parcialmente", False
+        ),
     )
     st.session_state.pending_focus_program_index = 0
     _set_current_scenario_metadata(
@@ -1033,15 +1501,18 @@ def _import_scenario_record(record: dict) -> None:
     saved_id = _save_current_scenario()
     st.session_state.selected_saved_scenario_id = saved_id
     st.session_state.resultado = None
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
+    _reset_delete_confirmation_state()
     st.session_state.current_page = "planejamento"
     st.session_state.toast_message = "Cenário importado com sucesso."
 
 
-def _delete_current_scenario() -> None:
-    current_id = st.session_state.get("current_scenario_id", "").strip()
-    if current_id:
+def _delete_scenario_by_id(scenario_id: str) -> None:
+    target_id = scenario_id.strip()
+    if target_id:
         scenarios = _load_saved_scenarios()
-        scenarios = [item for item in scenarios if item.get("id") != current_id]
+        scenarios = [item for item in scenarios if item.get("id") != target_id]
         _write_saved_scenarios(scenarios)
     _clear_active_scenario()
     st.session_state.toast_message = "Cenário excluído com sucesso."
@@ -1065,6 +1536,30 @@ def _queue_duplicate_scenario(scenario_id: str) -> None:
 
 def _queue_import_scenario(record: dict) -> None:
     st.session_state.pending_scenario_action = {"type": "import", "record": record}
+
+
+def _queue_delete_scenario(scenario_id: str) -> None:
+    st.session_state.pending_scenario_action = {"type": "delete", "id": scenario_id}
+
+
+def _queue_delete_scenario_targets(target_ids: list[str]) -> None:
+    st.session_state.pending_scenario_action = {"type": "delete_targets", "ids": target_ids}
+
+
+def _queue_duplicate_program(index: int) -> None:
+    st.session_state.pending_program_action = {"type": "duplicate", "index": int(index)}
+
+
+def _queue_remove_program(index: int) -> None:
+    st.session_state.pending_program_action = {"type": "remove", "index": int(index)}
+
+
+def _queue_move_program(index: int, direction: str) -> None:
+    st.session_state.pending_program_action = {
+        "type": "move",
+        "index": int(index),
+        "direction": direction,
+    }
 
 
 def _process_pending_scenario_action() -> None:
@@ -1105,12 +1600,117 @@ def _process_pending_scenario_action() -> None:
         record = pending.get("record")
         if record is not None:
             _import_scenario_record(record)
+        return
+
+    if action_type == "delete":
+        scenario_id = pending.get("id", "")
+        if scenario_id:
+            _delete_scenario_by_id(scenario_id)
+        return
+
+    if action_type == "delete_targets":
+        target_ids = [item.strip() for item in pending.get("ids", []) if str(item).strip()]
+        if target_ids:
+            scenarios = _load_saved_scenarios()
+            scenarios = [item for item in scenarios if item.get("id") not in set(target_ids)]
+            _write_saved_scenarios(scenarios)
+            _clear_active_scenario()
+            st.session_state.toast_message = "Cenário excluído com sucesso."
+        return
+
+
+def _process_pending_program_action() -> None:
+    pending = st.session_state.pop("pending_program_action", None)
+    if not pending:
+        return
+
+    action_type = pending.get("type")
+    index = int(pending.get("index", 0))
+    payloads = _snapshot_payloads_from_state()
+    if not payloads:
+        return
+    index = max(0, min(index, len(payloads) - 1))
+
+    if action_type == "duplicate":
+        duplicated_payload = deepcopy(payloads[index])
+        existing_names = [
+            (item.get("elemento_frente") or item.get("nome_programacao", "")).strip()
+            for item in payloads
+        ]
+        duplicated_name = _next_program_copy_name(
+            duplicated_payload.get("elemento_frente")
+            or duplicated_payload.get("nome_programacao", f"Programação {index + 1}"),
+            existing_names,
+        )
+        duplicated_payload["nome_programacao"] = duplicated_name
+        duplicated_payload["elemento_frente"] = duplicated_name
+        payloads.insert(index + 1, duplicated_payload)
+        _apply_payloads(payloads)
+        st.session_state.pending_focus_program_index = index + 1
+        return
+
+    if action_type == "remove":
+        if len(payloads) <= 1:
+            return
+        updated_payloads = payloads[:index] + payloads[index + 1 :]
+        _apply_payloads(updated_payloads)
+        next_index = min(index, len(updated_payloads) - 1)
+        st.session_state.pending_focus_program_index = max(0, next_index)
+        return
+
+    if action_type == "move":
+        direction = str(pending.get("direction", "")).strip().lower()
+        if direction not in {"left", "right"}:
+            return
+        target_index = index - 1 if direction == "left" else index + 1
+        if target_index < 0 or target_index >= len(payloads):
+            st.session_state.pending_focus_program_index = index
+            return
+        payloads[index], payloads[target_index] = payloads[target_index], payloads[index]
+        _apply_payloads(payloads)
+        st.session_state.pending_focus_program_index = target_index
+        return
 
 
 def _process_pending_selected_scenario() -> None:
     selected_id = st.session_state.pop("pending_selected_saved_scenario_id", None)
     if selected_id is not None:
         st.session_state.selected_saved_scenario_id = selected_id
+
+
+def _process_pending_delete_preview() -> None:
+    pending = st.session_state.pop("pending_delete_preview_record", None)
+    if not pending:
+        return
+
+    record = pending.get("record") or {}
+    if not record:
+        return
+
+    previous_id = str(pending.get("previous_id", "")).strip()
+    scenario_id = str(record.get("id", "")).strip()
+    scenario_date = date.fromisoformat(str(record.get("date", date.today().isoformat())))
+    turno = str(record.get("turno", "Diurno")).strip() or "Diurno"
+    scenario_name = str(record.get("name", "")).strip() or "Cenário"
+    scenario_label = str(record.get("label", "")).strip() or _build_scenario_label(
+        scenario_name,
+        scenario_date,
+        turno,
+    )
+
+    st.session_state.current_scenario_id = scenario_id
+    st.session_state.current_scenario_date = scenario_date
+    st.session_state.current_scenario_turno = turno
+    st.session_state.current_scenario_name = scenario_name
+    st.session_state.selected_saved_scenario_id = scenario_id
+    st.session_state.delete_target_scenario_id = scenario_id
+    st.session_state.delete_target_previous_scenario_id = previous_id
+    st.session_state.delete_target_scenario_label = scenario_label
+    st.session_state.delete_target_scenario_date = scenario_date
+    st.session_state.delete_target_scenario_turno = turno
+    st.session_state.delete_target_scenario_name = scenario_name
+    st.session_state.scenario_form_synced_from_active = True
+    st.session_state.confirm_delete_scenario = True
 
 
 def _sync_scenario_form_from_active(saved_scenarios: list[dict]) -> None:
@@ -1143,8 +1743,11 @@ def _go_to_page(page_name: str) -> None:
         st.session_state.current_scenario_date = date.today()
         st.session_state.current_scenario_turno = "Diurno"
         st.session_state.current_scenario_name = ""
+        st.session_state.resultado_reprogramado = None
+        st.session_state.reprogramacao_meta = None
         st.session_state.selected_saved_scenario_id = ""
         st.session_state.scenario_form_synced_from_active = True
+        _reset_delete_confirmation_state()
         st.query_params["programa"] = str(st.session_state.get("active_program_index", 0))
 
 
@@ -1161,46 +1764,139 @@ def _sync_active_program_from_query(total_programs: int) -> None:
 
 
 def _render_program_tab_tracking() -> None:
+    tab_labels = [
+        st.session_state.get(
+            _widget_key(index, "nome_programacao"),
+            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
+        )
+        for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
+    ]
+    labels_json = json.dumps(tab_labels, ensure_ascii=False)
     components.html(
-        """
+        f"""
         <script>
-        const syncProgramTab = () => {
-          const tablists = window.parent.document.querySelectorAll('[role="tablist"]');
-          if (!tablists.length) return;
-          const buttons = tablists[0].querySelectorAll('button[role="tab"]');
-          buttons.forEach((button, index) => {
+        const expectedLabels = {labels_json};
+        const storageKey = "codex_active_program_index";
+        const findProgramTablist = () => {{
+          const tablists = Array.from(window.parent.document.querySelectorAll('[role="tablist"]'));
+          return tablists.find((tablist) => {{
+            const labels = Array.from(tablist.querySelectorAll('button[role="tab"]'))
+              .map((button) => (button.textContent || '').trim());
+            if (labels.length !== expectedLabels.length) return false;
+            return expectedLabels.every((label, index) => labels[index] === label);
+          }});
+        }};
+
+        const bindProgramTabs = () => {{
+          const tablist = findProgramTablist();
+          if (!tablist) return;
+          const buttons = tablist.querySelectorAll('button[role="tab"]');
+          buttons.forEach((button, index) => {{
             if (button.dataset.programTrackingBound === "true") return;
             button.dataset.programTrackingBound = "true";
-            button.addEventListener("click", () => {
-              const url = new URL(window.parent.location.href);
-              url.searchParams.set("programa", String(index));
-              window.parent.history.replaceState({}, "", url.toString());
-            });
-          });
-        };
-        setTimeout(syncProgramTab, 80);
+            button.addEventListener("click", () => {{
+              const parentWindow = window.parent;
+              try {{
+                parentWindow.sessionStorage.setItem(storageKey, String(index));
+              }} catch (e) {{}}
+              const url = new URL(parentWindow.location.href);
+              if (url.searchParams.get("programa") !== String(index)) {{
+                url.searchParams.set("programa", String(index));
+                parentWindow.history.replaceState({{}}, "", url.toString());
+              }}
+            }});
+          }});
+        }};
+
+        setTimeout(bindProgramTabs, 80);
         </script>
         """,
         height=0,
     )
 
 
-def _render_pending_program_focus() -> None:
+def _render_active_program_focus() -> None:
     target_index = st.session_state.get("pending_focus_program_index")
+    force_target_index = target_index is not None
     if target_index is None:
-        return
-    st.query_params["programa"] = str(int(target_index))
+        target_index = st.session_state.get("active_program_index", 0)
+    target_index = int(target_index or 0)
+
+    tab_labels = [
+        st.session_state.get(
+            _widget_key(index, "nome_programacao"),
+            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
+        )
+        for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
+    ]
+    labels_json = json.dumps(tab_labels, ensure_ascii=False)
+    target_index = max(0, min(target_index, len(tab_labels) - 1))
+    st.session_state.active_program_index = target_index
+    st.query_params["programa"] = str(target_index)
     components.html(
         f"""
         <script>
-        const focusTab = () => {{
-          const tablists = window.parent.document.querySelectorAll('[role="tablist"]');
-          if (!tablists.length) return;
-          const buttons = tablists[0].querySelectorAll('button[role="tab"]');
-          const target = buttons[{int(target_index)}];
-          if (target) target.click();
+        const expectedLabels = {labels_json};
+        const targetIndex = {int(target_index)};
+        const forceTargetIndex = {str(force_target_index).lower()};
+        const storageKey = "codex_active_program_index";
+        const findProgramTablist = () => {{
+          const tablists = Array.from(window.parent.document.querySelectorAll('[role="tablist"]'));
+          return tablists.find((tablist) => {{
+            const labels = Array.from(tablist.querySelectorAll('button[role="tab"]'))
+              .map((button) => (button.textContent || '').trim());
+            if (labels.length !== expectedLabels.length) return false;
+            return expectedLabels.every((label, index) => labels[index] === label);
+          }});
         }};
-        setTimeout(focusTab, 80);
+
+        const resolveTargetIndex = () => {{
+          const parentWindow = window.parent;
+          let resolved = targetIndex;
+          if (forceTargetIndex) {{
+            try {{
+              parentWindow.sessionStorage.setItem(storageKey, String(targetIndex));
+            }} catch (e) {{}}
+          }} else {{
+            try {{
+              const stored = parentWindow.sessionStorage.getItem(storageKey);
+              if (stored !== null && !Number.isNaN(Number(stored))) {{
+                resolved = Number(stored);
+              }}
+            }} catch (e) {{}}
+          }}
+          const url = new URL(parentWindow.location.href);
+          if (url.searchParams.get("programa") !== String(resolved)) {{
+            url.searchParams.set("programa", String(resolved));
+            parentWindow.history.replaceState({{}}, "", url.toString());
+          }}
+          return resolved;
+        }};
+
+        const focusProgramTab = () => {{
+          const tablist = findProgramTablist();
+          if (!tablist) return;
+          const buttons = tablist.querySelectorAll('button[role="tab"]');
+          const resolvedTargetIndex = Math.max(0, Math.min(resolveTargetIndex(), buttons.length - 1));
+          const target = buttons[resolvedTargetIndex];
+          if (!target) return;
+          if (target.getAttribute("aria-selected") !== "true") target.click();
+        }};
+
+        let attempts = 0;
+        const intervalId = setInterval(() => {{
+          attempts += 1;
+          focusProgramTab();
+          const tablist = findProgramTablist();
+          const buttons = tablist ? tablist.querySelectorAll('button[role="tab"]') : [];
+          const resolvedTargetIndex = buttons.length
+            ? Math.max(0, Math.min(resolveTargetIndex(), buttons.length - 1))
+            : 0;
+          const target = buttons[resolvedTargetIndex];
+          if ((target && target.getAttribute("aria-selected") === "true") || attempts >= 12) {{
+            clearInterval(intervalId);
+          }}
+        }}, 120);
         </script>
         """,
         height=0,
@@ -1211,11 +1907,13 @@ def _render_pending_program_focus() -> None:
 def _read_payload_from_widgets(index: int) -> dict:
     usar_prazo = st.session_state[_widget_key(index, "usar_prazo")]
     primeira_custom = st.session_state[_widget_key(index, "permitir_primeira_viagem_customizada")]
+    elemento_frente = st.session_state[_widget_key(index, "elemento_frente")].strip()
+    nome_programacao = elemento_frente or f"Programação {index}"
     return {
         "id": f"concretagem-{index}",
-        "nome_programacao": st.session_state[_widget_key(index, "nome_programacao")],
+        "nome_programacao": nome_programacao,
         "local": st.session_state[_widget_key(index, "local")],
-        "elemento_frente": st.session_state[_widget_key(index, "elemento_frente")],
+        "elemento_frente": elemento_frente,
         "usina": st.session_state[_widget_key(index, "usina")],
         "tipo_cimento": st.session_state[_widget_key(index, "tipo_cimento")],
         "observacoes": st.session_state[_widget_key(index, "observacoes")],
@@ -1225,6 +1923,9 @@ def _read_payload_from_widgets(index: int) -> dict:
         "inicio_primeira_mistura": st.session_state[_widget_key(index, "inicio_primeira_mistura")].strftime(
             "%H:%M"
         ),
+        "inicio_primeira_mistura_offset_dias": st.session_state[
+            _widget_key(index, "inicio_primeira_mistura_offset_dias")
+        ],
         "prioridade": st.session_state[_widget_key(index, "prioridade")],
         "prazo_limite_descarga": (
             st.session_state[_widget_key(index, "prazo_limite_descarga")].strftime("%H:%M")
@@ -1271,73 +1972,82 @@ def _read_payload_from_widgets(index: int) -> dict:
     }
 
 
+def _sync_program_name_from_element(index: int) -> None:
+    elemento_frente = st.session_state.get(_widget_key(index, "elemento_frente"), "").strip()
+    st.session_state[_widget_key(index, "nome_programacao")] = (
+        elemento_frente or f"Programação {index}"
+    )
+
+
+def _sync_operation_mode(index: int) -> None:
+    if st.session_state.get(_widget_key(index, "com_bomba")) == "Sem bomba":
+        st.session_state[_widget_key(index, "max_bts_frente")] = 1
+
+
 def _render_scenario_form(index: int, payload: dict) -> None:
     _ensure_defaults(index, payload)
 
-    with st.container(border=True):
-        _render_subsection_heading(
-            "Identificação",
-            "Dados gerais da programação, frente e observações da concretagem.",
+    with st.expander("Identificação", expanded=True):
+        id1, id2, id3 = st.columns([1.35, 1.0, 1.45])
+        id1.text_input(
+            "Elemento / frente",
+            key=_widget_key(index, "elemento_frente"),
+            on_change=_sync_program_name_from_element,
+            args=(index,),
         )
-        col1, col2 = st.columns([1.2, 1.0])
-        with col1:
-            st.text_input("Nome da programação", key=_widget_key(index, "nome_programacao"))
-            st.text_input("Elemento / frente", key=_widget_key(index, "elemento_frente"))
-            st.text_input("Local", key=_widget_key(index, "local"))
-            st.text_input("Usina", key=_widget_key(index, "usina"))
-        with col2:
-            st.text_input("Tipo de cimento", key=_widget_key(index, "tipo_cimento"))
-            st.text_area(
-                "Observações",
-                key=_widget_key(index, "observacoes"),
-                height=140,
-            )
+        id2.text_input("Local", key=_widget_key(index, "local"))
+        id3.text_input("Observações", key=_widget_key(index, "observacoes"))
 
     st.write("")
 
-    with st.container(border=True):
-        _render_subsection_heading(
-            "Dados operacionais",
-            "Volumes, capacidade da frota e horários-base da operação.",
-        )
-        op1, op2, op3 = st.columns(3)
+    with st.expander("Dados da concretagem", expanded=True):
+        op1, op2, op3, op4, op5, op6, op7 = st.columns([1.05, 1.0, 1.0, 0.8, 0.8, 1.0, 0.9])
         op1.number_input(
-            "Volume total da concretagem (m³)",
+            "Volume total (m³)",
             min_value=0.0,
             step=1.0,
             key=_widget_key(index, "volume_total_m3"),
         )
         op2.number_input(
-            "Capacidade da BT (m³)",
+            "Capacidade BT (m³)",
             min_value=0.0,
             step=0.5,
             key=_widget_key(index, "capacidade_bt_m3"),
         )
-        op3.time_input(
-            "Início da 1ª mistura",
-            key=_widget_key(index, "inicio_primeira_mistura"),
-            step=300,
+        _sync_time_text_state(
+            _widget_key(index, "inicio_primeira_mistura"),
+            st.session_state[_widget_key(index, "inicio_primeira_mistura")],
         )
-
-        op4, op5, op6, op7 = st.columns([1, 1, 1, 1.2])
-        op4.checkbox(
-            "Usar prazo limite de descarga",
+        with op3:
+            _render_time_text_input(
+                "Início 1ª mistura",
+                _widget_key(index, "inicio_primeira_mistura"),
+                help_text="Digite no formato HH:MM.",
+            )
+        op4.selectbox(
+            "Dia início",
+            options=INICIO_DIA_OPTIONS,
+            format_func=_format_inicio_offset_label,
+            key=_widget_key(index, "inicio_primeira_mistura_offset_dias"),
+            help="Use D para o dia-base do cenário, D+1 para o dia seguinte.",
+        )
+        op5.checkbox(
+            "Usar prazo",
             key=_widget_key(index, "usar_prazo"),
         )
-        op5.time_input(
-            "Prazo limite para término da descarga",
-            key=_widget_key(index, "prazo_limite_descarga"),
-            step=300,
-            disabled=not st.session_state[_widget_key(index, "usar_prazo")],
+        _sync_time_text_state(
+            _widget_key(index, "prazo_limite_descarga"),
+            st.session_state[_widget_key(index, "prazo_limite_descarga")],
         )
-        op6.number_input(
-            "BTs fixas disponíveis (0 = opcional)",
-            min_value=0,
-            step=1,
-            key=_widget_key(index, "numero_bts_fixo"),
-        )
+        with op6:
+            _render_time_text_input(
+                "Prazo descarga",
+                _widget_key(index, "prazo_limite_descarga"),
+                disabled=not st.session_state[_widget_key(index, "usar_prazo")],
+                help_text="Digite no formato HH:MM.",
+            )
         op7.number_input(
-            "Prioridade (0 = sem prioridade; 1 = maior)",
+            "Prioridade",
             min_value=0,
             step=1,
             key=_widget_key(index, "prioridade"),
@@ -1346,55 +2056,30 @@ def _render_scenario_form(index: int, payload: dict) -> None:
 
     st.write("")
 
-    with st.container(border=True):
-        _render_subsection_heading(
-            "Configuração da operação",
-            "Restrições de simultaneidade e regras de operação na usina e na frente.",
-        )
-        cfg1, cfg2, cfg3, cfg4 = st.columns(4)
-        cfg1.radio(
+    with st.expander("Configuração da operação", expanded=True):
+        cfg1, cfg2, cfg3, cfg4, cfg5, cfg6 = st.columns([1.0, 0.9, 0.95, 1.0, 0.95, 1.0])
+        cfg1.selectbox(
             "Operação",
             options=["Com bomba", "Sem bomba"],
             key=_widget_key(index, "com_bomba"),
-            horizontal=True,
+            on_change=_sync_operation_mode,
+            args=(index,),
         )
+        com_bomba = st.session_state[_widget_key(index, "com_bomba")] == "Com bomba"
         cfg2.number_input(
-            "BTs simultâneas na bomba / frente",
+            "BTs na bomba",
             min_value=1,
             step=1,
             key=_widget_key(index, "max_bts_frente"),
+            disabled=not com_bomba,
+            help="Quando a operação estiver sem bomba, este campo permanece desabilitado.",
         )
-        cfg3.number_input(
-            "BTs simultâneas na mistura",
-            min_value=1,
-            step=1,
-            key=_widget_key(index, "max_bts_mistura"),
-        )
-        cfg4.number_input(
-            "BTs simultâneas na dosagem",
-            min_value=1,
-            step=1,
-            key=_widget_key(index, "max_bts_dosagem"),
-        )
-
-        cfg5, cfg6, cfg7, cfg8 = st.columns([1, 1.1, 1, 1.1])
-        cfg5.checkbox(
-            "Existe intervalo obrigatório entre misturas?",
-            key=_widget_key(index, "existe_intervalo_entre_misturas"),
-        )
-        cfg6.number_input(
-            "Intervalo entre misturas (min)",
-            min_value=0.0,
-            step=1.0,
-            key=_widget_key(index, "intervalo_entre_misturas_min"),
-            disabled=not st.session_state[_widget_key(index, "existe_intervalo_entre_misturas")],
-        )
-        cfg7.checkbox(
-            "Controlar intervalo máximo entre descargas?",
+        cfg3.checkbox(
+            "Controlar intervalo",
             key=_widget_key(index, "existe_intervalo_maximo_entre_descargas"),
         )
-        cfg8.number_input(
-            "Intervalo máximo entre descargas (min)",
+        cfg4.number_input(
+            "Intervalo máx. descargas (min)",
             min_value=0.0,
             step=1.0,
             key=_widget_key(index, "intervalo_maximo_entre_descargas_min"),
@@ -1402,49 +2087,73 @@ def _render_scenario_form(index: int, payload: dict) -> None:
                 _widget_key(index, "existe_intervalo_maximo_entre_descargas")
             ],
         )
+        cfg5.number_input(
+            "BTs fixas",
+            min_value=0,
+            step=1,
+            key=_widget_key(index, "numero_bts_fixo"),
+        )
+        cfg6.selectbox(
+            "Alocação BTs",
+            options=["dedicadas", "compartilhadas"],
+            key=_widget_key(index, "alocacao_bts"),
+        )
 
     st.write("")
 
-    with st.container(border=True):
-        _render_subsection_heading(
-            "Tempos do ciclo (minutos)",
-            "Tempos básicos usados na simulação de cada viagem da betoneira.",
+    with st.expander("Configurações da usina", expanded=True):
+        us1, us2, us3, us4, us5 = st.columns([1.5, 0.95, 0.95, 0.95, 1.05])
+        us1.text_input("Usina responsável", key=_widget_key(index, "usina"))
+        us2.number_input(
+            "BTs mistura",
+            min_value=1,
+            step=1,
+            key=_widget_key(index, "max_bts_mistura"),
         )
-        ciclo1, ciclo2, ciclo3, ciclo4 = st.columns(4)
+        us3.number_input(
+            "BTs dosagem",
+            min_value=1,
+            step=1,
+            key=_widget_key(index, "max_bts_dosagem"),
+        )
+        us4.checkbox(
+            "Intervalo entre misturas",
+            key=_widget_key(index, "existe_intervalo_entre_misturas"),
+        )
+        us5.number_input(
+            "Intervalo mistura (min)",
+            min_value=0.0,
+            step=1.0,
+            key=_widget_key(index, "intervalo_entre_misturas_min"),
+            disabled=not st.session_state[_widget_key(index, "existe_intervalo_entre_misturas")],
+        )
+
+    st.write("")
+
+    with st.expander("Tempos do ciclo (minutos)", expanded=True):
+        ciclo1, ciclo2, ciclo3, ciclo4, ciclo5, ciclo6, ciclo7 = st.columns(7)
         ciclo1.number_input("Mistura", min_value=0.0, step=1.0, key=_widget_key(index, "mistura_min"))
         ciclo2.number_input("Dosagem", min_value=0.0, step=1.0, key=_widget_key(index, "dosagem_min"))
         ciclo3.number_input("Ida", min_value=0.0, step=1.0, key=_widget_key(index, "ida_min"))
         ciclo4.number_input("Slump", min_value=0.0, step=1.0, key=_widget_key(index, "slump_min"))
-
-        ciclo5, ciclo6, ciclo7 = st.columns(3)
         ciclo5.number_input("Descarga", min_value=0.0, step=1.0, key=_widget_key(index, "descarga_min"))
         ciclo6.number_input("Lavagem", min_value=0.0, step=1.0, key=_widget_key(index, "lavagem_min"))
         ciclo7.number_input("Volta", min_value=0.0, step=1.0, key=_widget_key(index, "volta_min"))
 
     st.write("")
 
-    with st.container(border=True):
-        _render_subsection_heading(
-            "Configurações adicionais",
-            "Ajustes finos para primeira viagem, última parcial e compartilhamento de BTs.",
-        )
-        add1, add2, add3 = st.columns(3)
+    with st.expander("Configurações adicionais", expanded=False):
+        add1, add2, add3 = st.columns([1.15, 1.15, 0.95])
         add1.checkbox(
-            "Última viagem parcial com descarga proporcional",
+            "Última viagem parcial proporcional",
             key=_widget_key(index, "ultima_viagem_parcial_proporcional"),
         )
         add2.checkbox(
-            "Permitir volume customizado na 1ª viagem",
+            "Permitir 1ª viagem customizada",
             key=_widget_key(index, "permitir_primeira_viagem_customizada"),
         )
-        add3.selectbox(
-            "BTs dedicadas ou compartilhadas",
-            options=["dedicadas", "compartilhadas"],
-            key=_widget_key(index, "alocacao_bts"),
-        )
-
-        st.number_input(
-            "Volume da 1ª viagem (m³)",
+        add3.number_input(
+            "Volume 1ª viagem (m³)",
             min_value=0.0,
             step=0.5,
             key=_widget_key(index, "volume_primeira_viagem_m3"),
@@ -1452,18 +2161,374 @@ def _render_scenario_form(index: int, payload: dict) -> None:
         )
 
 
-def _build_concretagens_from_form() -> list[Concretagem]:
+def _build_concretagens_from_form(selected_program_numbers: list[int] | None = None) -> list[Concretagem]:
     payloads = []
     for index, _payload in enumerate(st.session_state.scenario_payloads, start=1):
         payloads.append(_read_payload_from_widgets(index))
     st.session_state.scenario_payloads = payloads
-    return [Concretagem.from_dict(payload, ordem=index - 1) for index, payload in enumerate(payloads, start=1)]
+    selected_set = {
+        int(item)
+        for item in (selected_program_numbers or [])
+        if 1 <= int(item) <= len(payloads)
+    }
+    filtered_payloads = (
+        [payload for index, payload in enumerate(payloads, start=1) if index in selected_set]
+        if selected_set
+        else payloads
+    )
+    return [
+        Concretagem.from_dict(payload, ordem=index - 1)
+        for index, payload in enumerate(filtered_payloads, start=1)
+    ]
 
 
-def _render_result(resultado) -> None:
-    with st.expander("Seção 3 — Resultados", expanded=True):
+def _clone_concretagens(concretagens: list[Concretagem]) -> list[Concretagem]:
+    return [
+        Concretagem.from_dict(concretagem.to_dict(), ordem=index)
+        for index, concretagem in enumerate(concretagens)
+    ]
+
+
+def _find_trip_for_reprogramming(resultado, concretagem_id: str, numero_viagem: int):
+    viagem = next(
+        (
+            item
+            for item in resultado.viagens
+            if item.concretagem_id == concretagem_id and item.numero_viagem == numero_viagem
+        ),
+        None,
+    )
+    if viagem is None:
+        raise ValueError("Não foi possível localizar a viagem informada para a reprogramação.")
+    return viagem
+
+
+def _reference_option_label(reference_type: str) -> str:
+    boundary, etapa = reference_type.split("|", 1)
+    prefix = "Início da" if boundary == "inicio" else "Fim da"
+    return f"{prefix} {etapa}"
+
+
+def _preserve_label_case(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return value
+    return value[:1].upper() + value[1:]
+
+
+def _trip_stage_options(resultado, concretagem_id: str, numero_viagem: int) -> list[str]:
+    viagem = _find_trip_for_reprogramming(resultado, concretagem_id, numero_viagem)
+    options: list[str] = []
+    seen: set[str] = set()
+    for etapa in viagem.etapas:
+        etapa_nome = etapa.etapa
+        if etapa_nome.startswith("Espera") or etapa_nome in seen:
+            continue
+        seen.add(etapa_nome)
+        options.append(etapa_nome)
+    if not options:
+        raise ValueError("A viagem informada não possui etapas operacionais disponíveis.")
+    return options
+
+
+def _find_trip_reference_datetime(
+    resultado,
+    concretagem_id: str,
+    numero_viagem: int,
+    reference_type: str,
+) -> datetime:
+    viagem = _find_trip_for_reprogramming(resultado, concretagem_id, numero_viagem)
+    boundary, etapa_nome = reference_type.split("|", 1)
+    etapa = next((item for item in viagem.etapas if item.etapa == etapa_nome), None)
+    if etapa is None:
+        raise ValueError(f"A viagem informada não possui etapa de {etapa_nome.lower()} disponível.")
+    return etapa.inicio if boundary == "inicio" else etapa.fim
+
+
+def _apply_fixed_bt_counts(
+    concretagens: list[Concretagem],
+    bt_counts: dict[str, int],
+) -> None:
+    for concretagem in concretagens:
+        concretagem.numero_bts_fixo = int(bt_counts.get(concretagem.grupo_bt, 1))
+
+
+def _recalculate_reprogramming(
+    base_resultado,
+    concretagem_id: str,
+    numero_viagem: int,
+    reference_type: str,
+    observed_datetime: datetime,
+    execution_mode: str,
+    max_total_bts: int,
+    override_group_bt_count: int | None = None,
+):
+    concretagens = _clone_concretagens(base_resultado.concretagens)
+    target = next(
+        (concretagem for concretagem in concretagens if concretagem.id == concretagem_id),
+        None,
+    )
+    if target is None:
+        raise ValueError("Não foi possível localizar a programação selecionada.")
+
+    planned_reference = _find_trip_reference_datetime(
+        base_resultado,
+        concretagem_id,
+        numero_viagem,
+        reference_type,
+    )
+    delta = observed_datetime - planned_reference
+    novo_inicio = target.inicio_datetime(base_resultado.data_base) + delta
+    target.inicio_primeira_mistura = novo_inicio.time()
+    target.inicio_primeira_mistura_offset_dias = max(
+        0, (novo_inicio.date() - base_resultado.data_base).days
+    )
+
+    should_force_fixed = execution_mode == "fixar_atual" or override_group_bt_count is not None
+    if should_force_fixed:
+        bt_counts = dict(base_resultado.bt_counts)
+        if override_group_bt_count is not None:
+            bt_counts[target.grupo_bt] = int(override_group_bt_count)
+        _apply_fixed_bt_counts(concretagens, bt_counts)
+        resultado = simular_ciclo_bt(
+            concretagens,
+            base_date=base_resultado.data_base,
+            sequenciar_por_prioridade=bool(base_resultado.sequenciamento_prioridade_ativo),
+            liberar_bt_compartilhada_parcialmente=bool(
+                st.session_state.get("liberar_bt_compartilhada_parcialmente", False)
+            ),
+        )
+    elif base_resultado.automatico:
+        resultado = calcular_dimensionamento_minimo(
+            concretagens,
+            base_date=base_resultado.data_base,
+            max_total_bts=max_total_bts,
+            sequenciar_por_prioridade=bool(base_resultado.sequenciamento_prioridade_ativo),
+            liberar_bt_compartilhada_parcialmente=bool(
+                st.session_state.get("liberar_bt_compartilhada_parcialmente", False)
+            ),
+        )
+    else:
+        resultado = simular_ciclo_bt(
+            concretagens,
+            base_date=base_resultado.data_base,
+            sequenciar_por_prioridade=bool(base_resultado.sequenciamento_prioridade_ativo),
+            liberar_bt_compartilhada_parcialmente=bool(
+                st.session_state.get("liberar_bt_compartilhada_parcialmente", False)
+            ),
+        )
+
+    return resultado, {
+        "programacao": target.nome_programacao,
+        "numero_viagem": numero_viagem,
+        "reference_type": reference_type,
+        "reference_label": _reference_option_label(reference_type),
+        "planned_reference": planned_reference,
+        "observed_reference": observed_datetime,
+        "delta_minutes": delta.total_seconds() / 60.0,
+        "novo_inicio_primeira_mistura": novo_inicio,
+        "execution_mode": execution_mode,
+        "group_override": override_group_bt_count,
+    }
+
+
+def _render_reprogramming_section(base_resultado) -> None:
+    with st.expander(
+        "Seção 2A — Reprogramação por marco observado",
+        expanded=bool(st.session_state.get("show_reprogramming_section", False)),
+    ):
         st.markdown(
-            "<div class='section-helper'>Resumo executivo, detalhamento operacional, gráfico de gantt e exportações.</div>",
+            "<div class='section-helper'>Use um marco real de início ou fim de qualquer etapa operacional de uma viagem para recalcular a programação e avaliar o impacto no restante do ciclo.</div>",
+            unsafe_allow_html=True,
+        )
+
+        program_options = {item.id: item.nome_programacao for item in base_resultado.concretagens}
+        selected_program_id = st.selectbox(
+            "Programação para reprogramar",
+            options=list(program_options.keys()),
+            format_func=lambda item: program_options[item],
+            key="reprog_program_id",
+        )
+        trip_options = sorted(
+            {
+                viagem.numero_viagem
+                for viagem in base_resultado.viagens
+                if viagem.concretagem_id == selected_program_id
+            }
+        )
+        r1, r2, r3, r4 = st.columns([0.8, 0.7, 0.95, 1.05])
+        selected_trip = r1.selectbox(
+            "Viagem observada",
+            options=trip_options,
+            key="reprog_trip_number",
+        )
+        reference_boundary = r2.selectbox(
+            "Marco",
+            options=["inicio", "fim"],
+            format_func=lambda item: "Início" if item == "inicio" else "Fim",
+            key="reprog_reference_boundary",
+        )
+        stage_options = _trip_stage_options(
+            base_resultado,
+            selected_program_id,
+            int(selected_trip),
+        )
+        reference_stage = r3.selectbox(
+            "Etapa",
+            options=stage_options,
+            key="reprog_reference_stage",
+        )
+        reference_type = f"{reference_boundary}|{reference_stage}"
+        execution_mode = r4.selectbox(
+            "Modo da reprogramação",
+            options=["manter_atual", "fixar_atual"],
+            format_func=lambda item: (
+                "Manter regra atual do cenário"
+                if item == "manter_atual"
+                else "Fixar BTs do cálculo atual"
+            ),
+            key="reprog_execution_mode",
+            help=(
+                "Escolha como o recálculo será feito depois do marco observado. "
+                "'Manter regra atual do cenário' repete a lógica do cálculo-base. "
+                "'Fixar BTs do cálculo atual' congela a frota usada no resultado-base."
+            ),
+        )
+        r4.caption(
+            (
+                "Reroda o cenário com a mesma lógica do cálculo-base."
+                if execution_mode == "manter_atual"
+                else "Usa a mesma quantidade de BTs do cálculo-base para reprogramar."
+            )
+        )
+
+        planned_reference = _find_trip_reference_datetime(
+            base_resultado,
+            selected_program_id,
+            int(selected_trip),
+            reference_type,
+        )
+        reprog_time_context = (
+            selected_program_id,
+            int(selected_trip),
+            reference_type,
+            planned_reference.date().isoformat(),
+            _format_time_text(planned_reference.time()),
+        )
+        if st.session_state.get("reprog_observed_time_context") != reprog_time_context:
+            st.session_state["reprog_observed_time_value"] = planned_reference.time().replace(
+                second=0,
+                microsecond=0,
+            )
+            _sync_time_text_state(
+                "reprog_observed_time_value",
+                st.session_state["reprog_observed_time_value"],
+                force=True,
+            )
+            st.session_state["reprog_observed_time_context"] = reprog_time_context
+        d1, d2, d3 = st.columns([1.0, 0.9, 1.1])
+        observed_date = d1.date_input(
+            "Data observada do marco",
+            value=planned_reference.date(),
+            format="DD/MM/YYYY",
+            key="reprog_observed_date",
+        )
+        with d2:
+            _render_time_text_input(
+                "Horário observado",
+                "reprog_observed_time_value",
+                help_text="Digite no formato HH:MM. Referência operacional preferencial em passos de 5 min.",
+            )
+        observed_time = st.session_state["reprog_observed_time_value"]
+        override_enabled = d3.checkbox(
+            "Sobrescrever BTs do grupo reprogramado",
+            key="reprog_override_enabled",
+            help=(
+                "Use quando quiser testar uma quantidade diferente de BTs só para o grupo da programação "
+                "reprogramada, sem alterar o cenário-base salvo."
+            ),
+        )
+        d3.caption(
+            (
+                "Opcional. Mantém a frota atual do grupo reprogramado."
+                if not override_enabled
+                else "Ao ativar, a reprogramação passa a usar a quantidade de BTs informada abaixo."
+            )
+        )
+
+        override_group_bt_count = None
+        if override_enabled:
+            override_group_bt_count = st.number_input(
+                "BTs do grupo reprogramado",
+                min_value=1,
+                step=1,
+                value=int(base_resultado.bt_counts.get(
+                    next(
+                        concretagem.grupo_bt
+                        for concretagem in base_resultado.concretagens
+                        if concretagem.id == selected_program_id
+                    ),
+                    1,
+                )),
+                key="reprog_override_bt_count",
+            )
+
+        observed_datetime = datetime.combine(observed_date, observed_time)
+        delta_minutes = (observed_datetime - planned_reference).total_seconds() / 60.0
+        target = next(
+            concretagem for concretagem in base_resultado.concretagens if concretagem.id == selected_program_id
+        )
+        novo_inicio_estimado = target.inicio_datetime(base_resultado.data_base) + timedelta(
+            minutes=delta_minutes
+        )
+        st.caption(
+            "Marco: "
+            f"{_reference_option_label(reference_type)} | "
+            "Planejado: "
+            f"{format_clock(planned_reference, base_resultado.data_base)} | "
+            "Observado: "
+            f"{format_clock(observed_datetime, base_resultado.data_base)} | "
+            "Desvio aplicado: "
+            f"{round_minutes(delta_minutes, 1)} min | "
+            "Novo início estimado da 1ª mistura: "
+            f"{format_clock(novo_inicio_estimado, base_resultado.data_base)}"
+        )
+
+        if st.button("Recalcular reprogramação", use_container_width=True, type="primary"):
+            try:
+                resultado_reprogramado, reprog_meta = _recalculate_reprogramming(
+                    base_resultado,
+                    concretagem_id=selected_program_id,
+                    numero_viagem=int(selected_trip),
+                    reference_type=reference_type,
+                    observed_datetime=observed_datetime,
+                    execution_mode=execution_mode,
+                    max_total_bts=int(st.session_state.max_total_bts),
+                    override_group_bt_count=(
+                        int(override_group_bt_count) if override_enabled and override_group_bt_count else None
+                    ),
+                )
+                st.session_state.resultado_reprogramado = resultado_reprogramado
+                st.session_state.reprogramacao_meta = reprog_meta
+                st.session_state["reprog_result_default_tab"] = "Gantt operacional"
+            except Exception as exc:
+                st.session_state.resultado_reprogramado = None
+                st.session_state.reprogramacao_meta = None
+                st.error(str(exc))
+
+
+def _render_result(
+    resultado,
+    *,
+    section_title: str = "Seção 3 — Resultados",
+    helper_text: str = "Resumo executivo, detalhamento operacional, gráfico de gantt e exportações.",
+    widget_prefix: str = "base",
+    gantt_observed_marker: dict | None = None,
+    expanded: bool = True,
+) -> None:
+    with st.expander(section_title, expanded=expanded):
+        st.markdown(
+            f"<div class='section-helper'>{helper_text}</div>",
             unsafe_allow_html=True,
         )
 
@@ -1486,6 +2551,16 @@ def _render_result(resultado) -> None:
             and resumo.get("bts_sugeridas_continuidade") is not None
         ]
         bt_sugerida_card = max(bts_sugeridas_continuidade) if bts_sugeridas_continuidade else None
+        report_label = _current_scenario_label()
+        report_filename_base = safe_identifier(report_label) or "cenario"
+        if widget_prefix == "reprog":
+            report_filename_base = f"{report_filename_base}_reprogramacao"
+        relatorio_pdf_bytes = exportar_relatorio_operacional_pdf(
+            resultado,
+            scenario_label=report_label,
+            helper_text=helper_text,
+            observed_marker=gantt_observed_marker,
+        )
 
         cards1 = st.columns(5)
         modo_valor = "Automático" if resultado.automatico else "Fixo"
@@ -1539,151 +2614,91 @@ def _render_result(resultado) -> None:
                 (
                     "Sem espera relevante"
                     if resultado.gargalo_por_espera == "sem espera"
-                    else str(resultado.gargalo_por_espera).capitalize()
+                    else _preserve_label_case(resultado.gargalo_por_espera)
                 ),
-                bt_summary,
+                (
+                    "Sem espera acumulada relevante"
+                    if resultado.gargalo_por_espera == "sem espera"
+                    else "Recurso com maior espera acumulada"
+                ),
                 "warn",
             )
         with cards1[4]:
             _render_result_status_card(
                 "Recurso mais ocupado",
-                str(resultado.recurso_mais_ocupado).capitalize(),
-                bt_summary,
+                _preserve_label_case(resultado.recurso_mais_ocupado),
+                "Maior taxa de ocupação relativa",
                 "warn",
             )
 
-        linked_notes = st.columns(5)
-        with linked_notes[0]:
-            if not prazo_configurado:
-                _render_result_linked_note(
-                    "Prazo",
-                    "Nenhuma programação deste cenário possui prazo limite de descarga configurado.",
-                    "info",
-                )
-            elif resultado.prazo_atendido:
-                _render_result_linked_note(
-                    "Prazo",
-                    "O cenário atende todos os prazos de descarga informados.",
-                    "ok",
-                )
-            else:
-                _render_result_linked_note(
-                    "Prazo",
-                    "O cenário não atende pelo menos um dos prazos de descarga informados.",
-                    "bad",
-                )
-
-        with linked_notes[1]:
-            if restricao_intervalo_ativa:
-                if resultado.atende_intervalo_descargas:
-                    _render_result_linked_note(
-                        "Continuidade",
-                        "Os intervalos entre descargas atendem a restrição operacional configurada.",
-                        "ok",
-                    )
-                else:
-                    _render_result_linked_note(
-                        "Continuidade",
-                        "Os intervalos entre descargas não atendem a restrição operacional configurada.",
-                        "bad",
-                    )
-                    for intervalo in resultado.intervalos_descarga:
-                        if not intervalo["violacao"]:
-                            continue
-                        _render_result_linked_note(
-                            "Violação de continuidade",
-                            (
-                                f"{intervalo['frente_label']}: intervalo de "
-                                f"{round_minutes(intervalo['intervalo_min'], 1)} min entre "
-                                f"{format_clock(intervalo['fim_descarga_anterior'], resultado.data_base)} "
-                                "e "
-                                f"{format_clock(intervalo['inicio_proxima_descarga'], resultado.data_base)} "
-                                f"(limite {round_minutes(intervalo['limite_min'], 1)} min)."
-                            ),
-                            "bad",
-                        )
-
-        with linked_notes[2]:
-            if resultado.automatico and resultado.dimensionamento_encontrado:
-                _render_result_linked_note(
-                    "Dimensionamento",
-                    f"Dimensionamento mínimo encontrado. {bt_summary}.",
-                    "ok",
-                )
-            elif resultado.automatico:
-                _render_result_linked_note(
-                    "Dimensionamento",
-                    f"Dimensionamento mínimo não encontrado dentro do limite testado. {bt_summary}.",
-                    "warn",
-                )
-            else:
-                _render_result_linked_note(
-                    "Simulação",
-                    f"Simulação com BT fixa executada. {bt_summary}.",
-                    "info",
-                )
-
-        with linked_notes[3]:
-            if resultado.gargalo_por_espera == "sem espera":
-                _render_result_linked_note(
-                    "Espera",
-                    "Não houve fila relevante no cenário calculado; o card ao lado mostra o recurso mais ocupado no cronograma final.",
-                    "info",
-                )
-        with linked_notes[4]:
-            if resultado.sequenciamento_prioridade_ativo:
-                _render_result_linked_note(
-                    "Sequenciamento",
-                    "Prioridade ativa. A ordem segue o início da 1ª mistura e, em empate, prioridade, prazo e ordem de cadastro.",
-                    "info",
-                )
-            for warning in resultado.warnings:
-                _render_result_linked_note(
-                    "Atenção",
-                    warning,
-                    "warn",
-                )
-
         st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
 
-        cards2 = st.columns(6 if bt_sugerida_card is not None else 5)
-        with cards2[0]:
-            _render_result_mini_card(
-                "Modo de cálculo",
-                modo_valor,
-                modo_sub,
+        resumo_apoio_rows = [
+            {"Indicador": "Modo de cálculo", "Valor": modo_valor, "Detalhe": modo_sub},
+            {
+                "Indicador": "Volume total",
+                "Valor": f"{round_minutes(total_volume, 2)} m³",
+                "Detalhe": "Somatório das programações calculadas",
+            },
+            {
+                "Indicador": "Viagens",
+                "Valor": str(len(resultado.viagens)),
+                "Detalhe": "Total de viagens geradas",
+            },
+            {
+                "Indicador": "Última viagem",
+                "Valor": format_clock(resultado.termino_ultima_viagem, resultado.data_base),
+                "Detalhe": "Inclui lavagem e retorno",
+            },
+        ]
+        prazos_resumo = [
+            resumo.get("prazo_raw")
+            for resumo in resultado.resumo
+            if resumo.get("prazo_raw") is not None
+        ]
+        if prazos_resumo:
+            resumo_apoio_rows.append(
+                {
+                    "Indicador": "Prazo limite",
+                    "Valor": ", ".join(
+                        sorted(
+                            {
+                                format_clock(prazo, resultado.data_base)
+                                for prazo in prazos_resumo
+                            }
+                        )
+                    ),
+                    "Detalhe": "Horário limite configurado",
+                }
             )
-        with cards2[1]:
-            _render_result_mini_card(
-                "Volume total",
-                f"{round_minutes(total_volume, 2)} m³",
-                "Somatório de todas as programações calculadas",
-            )
-        with cards2[2]:
-            _render_result_mini_card(
-                "Viagens",
-                str(len(resultado.viagens)),
-                "Total de viagens geradas na simulação",
-            )
-        with cards2[3]:
-            _render_result_mini_card(
-                "Última descarga",
-                format_clock(resultado.termino_ultima_descarga, resultado.data_base),
-                "Horário principal de atendimento ao prazo",
-            )
-        with cards2[4]:
-            _render_result_mini_card(
-                "Última viagem",
-                format_clock(resultado.termino_ultima_viagem, resultado.data_base),
-                "Inclui lavagem e retorno da última BT",
-            )
+        resumo_apoio_rows.append(
+            {
+                "Indicador": "Última descarga",
+                "Valor": format_clock(resultado.termino_ultima_descarga, resultado.data_base),
+                "Detalhe": "Referência principal para prazo",
+            }
+        )
         if bt_sugerida_card is not None:
-            with cards2[5]:
-                _render_result_mini_card(
-                    "BTs sugeridas",
-                    str(bt_sugerida_card),
-                    "Referência visual para atender continuidade",
-                )
+            resumo_apoio_rows.append(
+                {
+                    "Indicador": "BTs sugeridas",
+                    "Valor": str(bt_sugerida_card),
+                    "Detalhe": "Referência visual para continuidade",
+                }
+            )
+        st.dataframe(
+            pd.DataFrame(resumo_apoio_rows),
+            hide_index=True,
+            use_container_width=True,
+            height=_dataframe_height_for_rows(
+                len(resumo_apoio_rows),
+                row_height=34,
+                header_height=36,
+                padding=2,
+                min_height=110,
+                max_height=280,
+            ),
+        )
 
         st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
 
@@ -1693,20 +2708,26 @@ def _render_result(resultado) -> None:
                 resultado.recomendacoes_ajuste,
             )
 
-        resumo_tab, tabela_tab, gantt_tab, disponibilidade_tab, premissas_tab = st.tabs(
-            [
-                "Resumo executivo",
-                "Tabela detalhada",
-                "Gantt operacional",
-                "Disponibilidade de BT",
-                "Premissas consideradas",
-            ]
+        result_tab_labels = [
+            "Planejamento",
+            "Disponibilidade",
+            "Resumo",
+            "Premissas",
+        ]
+        default_result_tab = st.session_state.get(f"{widget_prefix}_result_default_tab")
+        if default_result_tab not in result_tab_labels:
+            default_result_tab = None
+        gantt_tab, disponibilidade_tab, resumo_tab, premissas_tab = st.tabs(
+            result_tab_labels,
+            default=default_result_tab,
         )
+        if default_result_tab is not None:
+            st.session_state[f"{widget_prefix}_result_default_tab"] = None
 
         with resumo_tab:
             concretagem_lookup = {concretagem.id: concretagem for concretagem in resultado.concretagens}
             for resumo in resultado.resumo:
-                with st.expander(resumo["nome_programacao"], expanded=True):
+                with st.expander(resumo["nome_programacao"], expanded=False):
                         concretagem = concretagem_lookup.get(str(resumo["id"]))
                         viagens_programacao = [
                             viagem for viagem in resultado.viagens if viagem.concretagem_id == resumo["id"]
@@ -1732,7 +2753,7 @@ def _render_result(resultado) -> None:
                         gargalo_programacao_label = (
                             "Sem espera relevante"
                             if esperas[gargalo_programacao] <= 0
-                            else gargalo_programacao.capitalize()
+                            else _preserve_label_case(gargalo_programacao)
                         )
 
                         status_prazo = "Atende" if resumo["atende_prazo"] else "Não atende"
@@ -1746,6 +2767,9 @@ def _render_result(resultado) -> None:
                             if restricoes and restricoes.alocacao_bts == "dedicadas"
                             else "BTs compartilhadas"
                         )
+                        recurso_descarga_label = (
+                            "bomba" if restricoes and restricoes.com_bomba else "frente"
+                        )
                         prazo_delta_label = "N/A"
                         if prazo_delta is not None:
                             if prazo_delta <= 0:
@@ -1753,8 +2777,7 @@ def _render_result(resultado) -> None:
                             else:
                                 prazo_delta_label = f"Atraso de {round_minutes(prazo_delta, 1)} min"
 
-                        resumo_tabela = pd.DataFrame(
-                            [
+                        resumo_rows = [
                             {
                                 "Grupo": "Identificação",
                                 "Indicador": "Local",
@@ -1805,7 +2828,7 @@ def _render_result(resultado) -> None:
                             },
                             {
                                 "Grupo": "Operação",
-                                "Indicador": "BTs da frente",
+                                "Indicador": f"BTs na {recurso_descarga_label}",
                                 "Valor": str(resumo["bts_utilizadas"]),
                             },
                             {
@@ -1822,7 +2845,7 @@ def _render_result(resultado) -> None:
                             },
                             {
                                 "Grupo": "Operação",
-                                "Indicador": "Limite simultâneo na frente",
+                                "Indicador": f"Limite simultâneo na {recurso_descarga_label}",
                                 "Valor": (
                                     str(restricoes.max_bts_frente)
                                     if restricoes
@@ -1884,7 +2907,9 @@ def _render_result(resultado) -> None:
                             {
                                 "Grupo": "Prazos e desempenho",
                                 "Indicador": "Início da 1ª mistura",
-                                "Valor": resumo["inicio_primeira_mistura"].strftime("%H:%M"),
+                                "Valor": format_clock(
+                                    resumo.get("inicio_primeira_mistura_raw"), resultado.data_base
+                                ),
                             },
                             {
                                 "Grupo": "Prazos e desempenho",
@@ -1965,11 +2990,6 @@ def _render_result(resultado) -> None:
                             },
                             {
                                 "Grupo": "Configuração consolidada",
-                                "Indicador": "Restrições adotadas",
-                                "Valor": resumo["restricoes_adotadas"],
-                            },
-                            {
-                                "Grupo": "Configuração consolidada",
                                 "Indicador": "BT fixa cadastrada",
                                 "Valor": (
                                     str(concretagem.numero_bts_fixo)
@@ -1995,6 +3015,21 @@ def _render_result(resultado) -> None:
                                     else "Não"
                                 ),
                             },
+                            *[
+                                {
+                                    "Grupo": "Configuração consolidada",
+                                    "Indicador": f"Restrição adotada {idx}",
+                                    "Valor": part,
+                                }
+                                for idx, part in enumerate(
+                                    [
+                                        part.strip()
+                                        for part in str(resumo.get("restricoes_adotadas", "")).split(";")
+                                        if part.strip()
+                                    ],
+                                    start=1,
+                                )
+                            ],
                             {
                                 "Grupo": "Tempos de ciclo",
                                 "Indicador": "Mistura",
@@ -2059,18 +3094,47 @@ def _render_result(resultado) -> None:
                                 ),
                             },
                             ]
-                        )
+                        resumo_tabela = pd.DataFrame(resumo_rows)
                         st.table(resumo_tabela)
 
-        with tabela_tab:
+        with gantt_tab:
+            figura_interativa = gerar_gantt_interativo(resultado, observed_marker=gantt_observed_marker)
+            if figura_interativa is not None:
+                st.plotly_chart(
+                    figura_interativa,
+                    use_container_width=True,
+                    config={
+                        "displaylogo": False,
+                        "toImageButtonOptions": {
+                            "format": "png",
+                            "filename": "gantt_interativo",
+                            "scale": 1,
+                            "width": None,
+                            "height": None,
+                        },
+                    },
+                    key=f"{widget_prefix}_gantt_interativo",
+                )
+            st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
             csv_bytes = exportar_detalhamento_csv(resultado.dataframe_detalhado)
-            st.download_button(
+            export_col1, export_col2 = st.columns(2)
+            export_col1.download_button(
                 "Baixar CSV do detalhamento",
                 data=csv_bytes,
                 file_name="detalhamento_concretagens.csv",
                 mime="text/csv",
+                key=f"{widget_prefix}_download_detalhamento",
+                use_container_width=True,
             )
-            dataframe_filtrado = _apply_detail_filters(resultado.dataframe_detalhado)
+            export_col2.download_button(
+                "Baixar relatório operacional (PDF)",
+                data=relatorio_pdf_bytes,
+                file_name=f"{report_filename_base}_relatorio_operacional.pdf",
+                mime="application/pdf",
+                key=f"{widget_prefix}_download_relatorio_pdf",
+                use_container_width=True,
+            )
+            dataframe_filtrado = _apply_detail_filters(resultado.dataframe_detalhado, key_prefix=widget_prefix)
             st.dataframe(
                 dataframe_filtrado,
                 use_container_width=True,
@@ -2085,37 +3149,25 @@ def _render_result(resultado) -> None:
                 ),
             )
 
-        with gantt_tab:
-            figura = gerar_gantt(resultado)
-            buffer = BytesIO()
-            figura.savefig(buffer, format="png", dpi=200, bbox_inches="tight")
-            buffer.seek(0)
-            st.download_button(
-                "Salvar PNG do gantt",
-                data=buffer.getvalue(),
-                file_name="gantt_concretagens.png",
-                mime="image/png",
-            )
-            st.pyplot(figura, use_container_width=True)
-
         with disponibilidade_tab:
-            figura_disponibilidade = gerar_disponibilidade_bt(resultado)
+            figura_disponibilidade_interativa = gerar_disponibilidade_bt_interativa(resultado)
+            if figura_disponibilidade_interativa is not None:
+                st.plotly_chart(
+                    figura_disponibilidade_interativa,
+                    use_container_width=True,
+                    config={
+                        "displaylogo": False,
+                        "toImageButtonOptions": {
+                            "format": "png",
+                            "filename": "disponibilidade_bt_interativa",
+                            "scale": 1,
+                            "width": None,
+                            "height": None,
+                        },
+                    },
+                    key=f"{widget_prefix}_disponibilidade_interativa",
+                )
             tabela_disponibilidade = gerar_tabela_disponibilidade_bt(resultado)
-            buffer_disponibilidade = BytesIO()
-            figura_disponibilidade.savefig(
-                buffer_disponibilidade,
-                format="png",
-                dpi=200,
-                bbox_inches="tight",
-            )
-            buffer_disponibilidade.seek(0)
-            st.download_button(
-                "Salvar PNG da disponibilidade de BT",
-                data=buffer_disponibilidade.getvalue(),
-                file_name="disponibilidade_bt.png",
-                mime="image/png",
-            )
-            st.pyplot(figura_disponibilidade, use_container_width=True)
             st.table(tabela_disponibilidade)
 
         with premissas_tab:
@@ -2166,6 +3218,8 @@ def main() -> None:
         st.session_state.max_total_bts = 12
     if "sequenciar_por_prioridade" not in st.session_state:
         st.session_state.sequenciar_por_prioridade = False
+    if "liberar_bt_compartilhada_parcialmente" not in st.session_state:
+        st.session_state.liberar_bt_compartilhada_parcialmente = False
     if "current_scenario_date" not in st.session_state:
         st.session_state.current_scenario_date = date.today()
     if "current_scenario_turno" not in st.session_state:
@@ -2178,23 +3232,53 @@ def main() -> None:
         st.session_state.selected_saved_scenario_id = ""
     if "toast_message" not in st.session_state:
         st.session_state.toast_message = ""
+    if "last_saved_scenario_signature" not in st.session_state:
+        st.session_state.last_saved_scenario_signature = ""
+    if "resultado_reprogramado" not in st.session_state:
+        st.session_state.resultado_reprogramado = None
+    if "reprogramacao_meta" not in st.session_state:
+        st.session_state.reprogramacao_meta = None
     if "pending_scenario_action" not in st.session_state:
         st.session_state.pending_scenario_action = None
+    if "pending_program_action" not in st.session_state:
+        st.session_state.pending_program_action = None
     if "current_page" not in st.session_state:
         st.session_state.current_page = "cenario"
     if "pending_focus_program_index" not in st.session_state:
         st.session_state.pending_focus_program_index = None
     if "confirm_delete_scenario" not in st.session_state:
         st.session_state.confirm_delete_scenario = False
+    if "delete_target_scenario_id" not in st.session_state:
+        st.session_state.delete_target_scenario_id = ""
+    if "delete_target_scenario_label" not in st.session_state:
+        st.session_state.delete_target_scenario_label = ""
+    if "delete_target_previous_scenario_id" not in st.session_state:
+        st.session_state.delete_target_previous_scenario_id = ""
+    if "delete_target_scenario_date" not in st.session_state:
+        st.session_state.delete_target_scenario_date = None
+    if "delete_target_scenario_turno" not in st.session_state:
+        st.session_state.delete_target_scenario_turno = ""
+    if "delete_target_scenario_name" not in st.session_state:
+        st.session_state.delete_target_scenario_name = ""
+    if "pending_delete_preview_record" not in st.session_state:
+        st.session_state.pending_delete_preview_record = None
+    if "delete_cancel_restore_state" not in st.session_state:
+        st.session_state.delete_cancel_restore_state = None
     if "scenario_form_synced_from_active" not in st.session_state:
         st.session_state.scenario_form_synced_from_active = False
     if "active_program_index" not in st.session_state:
         st.session_state.active_program_index = 0
+    if "last_calculated_signature" not in st.session_state:
+        st.session_state.last_calculated_signature = ""
+    if "show_reprogramming_section" not in st.session_state:
+        st.session_state.show_reprogramming_section = False
 
     _inject_styles()
 
     _process_pending_scenario_action()
+    _process_pending_program_action()
     _process_pending_selected_scenario()
+    _process_pending_delete_preview()
     saved_scenarios = _load_saved_scenarios()
     saved_ids = {item.get("id", "") for item in saved_scenarios}
     if st.session_state.selected_saved_scenario_id and st.session_state.selected_saved_scenario_id not in saved_ids:
@@ -2353,8 +3437,16 @@ def main() -> None:
             scenario_export_error = str(exc)
 
         with st.container(border=True):
-            st.markdown("**Cenário em edição**")
-            topo1, topo2, topo3, topo4, topo5 = st.columns([1.55, 0.92, 0.82, 0.82, 0.86])
+            st.markdown(
+                (
+                    "**Cenário em edição** "
+                    "<span style='font-size:0.86rem;color:#7c8796;font-weight:400;'>"
+                    "(salvamento automático)"
+                    "</span>"
+                ),
+                unsafe_allow_html=True,
+            )
+            topo1, topo2, topo4, topo5 = st.columns([1.65, 1.0, 1.0, 1.0])
             with topo1:
                 _render_active_scenario_box()
             topo2.download_button(
@@ -2367,19 +3459,16 @@ def main() -> None:
             )
             if scenario_export_error:
                 topo2.caption("Preencha o nome do cenário para exportar.")
-            if topo3.button("Salvar cenário", use_container_width=True):
+            if topo4.button("Excluir cenário", use_container_width=True):
                 try:
-                    st.session_state.scenario_payloads = _snapshot_payloads_from_state()
-                    saved_id = _save_current_scenario()
-                    st.session_state.pending_selected_saved_scenario_id = saved_id
-                    _queue_load_scenario(saved_id)
-                    st.session_state.toast_message = "Cenário salvo com sucesso."
+                    current_record = _build_current_scenario_record()
+                    st.session_state.pending_delete_preview_record = {
+                        "record": current_record,
+                        "previous_id": st.session_state.get("current_scenario_id", "").strip(),
+                    }
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
-            if topo4.button("Excluir cenário", use_container_width=True):
-                st.session_state.confirm_delete_scenario = True
-                st.rerun()
             if topo5.button("Voltar para cenários", use_container_width=True):
                 _go_to_page("cenario")
                 st.rerun()
@@ -2401,21 +3490,22 @@ def main() -> None:
                 key="current_scenario_name",
                 placeholder="Digite um nome para o cenário",
             )
-            st.markdown(
-                f"<div class='scenario-meta-preview'>Nome completo do cenário: <strong>{_current_scenario_label()}</strong></div>",
-                unsafe_allow_html=True,
-            )
 
         if st.session_state.confirm_delete_scenario:
-            message = f"Confirma a exclusão do cenário `{_current_scenario_label()}`?"
-            st.warning(message)
+            target_label = st.session_state.get("delete_target_scenario_label", "").strip() or _current_scenario_label()
+            message = f"Confirma a exclusão do cenário `{target_label}`?"
+            st.error(message)
             confirm1, confirm2 = st.columns(2)
             if confirm1.button("Confirmar exclusão", use_container_width=True):
-                st.session_state.confirm_delete_scenario = False
-                _delete_current_scenario()
+                target_ids = [
+                    st.session_state.get("delete_target_scenario_id", "").strip(),
+                    st.session_state.get("delete_target_previous_scenario_id", "").strip(),
+                ]
+                _reset_delete_confirmation_state()
+                _queue_delete_scenario_targets(target_ids)
                 st.rerun()
             if confirm2.button("Cancelar", use_container_width=True):
-                st.session_state.confirm_delete_scenario = False
+                _reset_delete_confirmation_state()
                 st.rerun()
 
         st.markdown("<div style='height: 0.9rem;'></div>", unsafe_allow_html=True)
@@ -2426,8 +3516,19 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
             payloads = _snapshot_payloads_from_state()
+            pending_focus = st.session_state.get("pending_focus_program_index")
+            if pending_focus is not None:
+                st.query_params["programa"] = str(max(0, min(int(pending_focus), len(payloads) - 1)))
             _sync_active_program_from_query(len(payloads))
-            active_index = max(0, min(st.session_state.active_program_index, len(payloads) - 1))
+            active_index = max(0, min(int(st.session_state.get("active_program_index", 0)), len(payloads) - 1))
+
+            tab_labels = [
+                st.session_state.get(
+                    _widget_key(index, "nome_programacao"),
+                    payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
+                )
+                for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
+            ]
 
             toolbar1, toolbar2, toolbar3 = st.columns([1, 1, 1])
             if toolbar1.button("Adicionar programação", use_container_width=True):
@@ -2435,112 +3536,272 @@ def main() -> None:
                 _apply_payloads(payloads)
                 st.session_state.pending_focus_program_index = len(payloads) - 1
                 st.rerun()
-            if toolbar2.button(
-                "Duplicar programação",
-                use_container_width=True,
-                disabled=len(payloads) == 0,
-            ):
-                source_index = active_index
-                duplicated_payload = deepcopy(payloads[source_index])
-                existing_names = [item.get("nome_programacao", "") for item in payloads]
-                duplicated_payload["nome_programacao"] = _next_program_copy_name(
-                    duplicated_payload.get("nome_programacao", f"Programação {source_index + 1}"),
-                    existing_names,
-                )
-                payloads.insert(source_index + 1, duplicated_payload)
-                _apply_payloads(payloads)
-                st.session_state.pending_focus_program_index = source_index + 1
-                st.rerun()
-            if toolbar3.button(
-                "Remover programação",
-                use_container_width=True,
-                disabled=len(st.session_state.scenario_payloads) == 1,
-            ):
-                updated_payloads = payloads[:active_index] + payloads[active_index + 1 :]
-                _apply_payloads(updated_payloads)
-                st.session_state.pending_focus_program_index = max(0, len(updated_payloads) - 1)
-                if updated_payloads:
-                    st.session_state.pending_focus_program_index = max(0, active_index - (1 if active_index == len(payloads) - 1 else 0))
-                st.rerun()
-
-            tab_labels = [
-                payload.get("nome_programacao", f"Programação {index}")
-                for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
-            ]
+            toolbar2.empty()
+            toolbar3.empty()
             tabs = st.tabs(tab_labels)
             for index, (tab, payload) in enumerate(
                 zip(tabs, st.session_state.scenario_payloads),
                 start=1,
             ):
                 with tab:
+                    tab_toolbar1, tab_toolbar2, tab_toolbar3, tab_toolbar4 = st.columns([0.8, 0.8, 1.15, 1.15])
+                    if tab_toolbar1.button(
+                        "Mover à esquerda",
+                        key=f"mover_programacao_esquerda_{index}",
+                        use_container_width=True,
+                        disabled=index == 1,
+                    ):
+                        _queue_move_program(index - 1, "left")
+                        st.rerun()
+                    if tab_toolbar2.button(
+                        "Mover à direita",
+                        key=f"mover_programacao_direita_{index}",
+                        use_container_width=True,
+                        disabled=index == len(st.session_state.scenario_payloads),
+                    ):
+                        _queue_move_program(index - 1, "right")
+                        st.rerun()
+                    if tab_toolbar3.button(
+                        "Duplicar programação",
+                        key=f"duplicar_programacao_{index}",
+                        use_container_width=True,
+                    ):
+                        _queue_duplicate_program(index - 1)
+                        st.rerun()
+                    if tab_toolbar4.button(
+                        "Remover programação",
+                        key=f"remover_programacao_{index}",
+                        use_container_width=True,
+                        disabled=len(st.session_state.scenario_payloads) == 1,
+                    ):
+                        _queue_remove_program(index - 1)
+                        st.rerun()
+                    st.markdown("<div style='height: 0.35rem;'></div>", unsafe_allow_html=True)
                     _render_scenario_form(index, payload)
             _render_program_tab_tracking()
-            _render_pending_program_focus()
+            _render_active_program_focus()
+        _invalidate_stale_result_if_needed()
+        _sync_reprogramming_visibility()
 
-        st.write("")
+        st.markdown("<div class='main-section-gap'></div>", unsafe_allow_html=True)
 
         with st.expander("Seção 2 — Configuração do cálculo", expanded=True):
             st.markdown(
-                "<div class='section-helper'>Escolha entre simulação com frota fixa ou dimensionamento automático antes de calcular.</div>",
+                "<div class='section-helper'>Escolha o tipo de cálculo e informe apenas os parâmetros usados nesse modo.</div>",
                 unsafe_allow_html=True,
             )
-            cfg1, cfg2 = st.columns([1.3, 1.0])
+
+            # Linha 1: programações para calcular
+            calc_program_options = list(range(1, len(st.session_state.scenario_payloads) + 1))
+            calc_program_labels = {
+                index: st.session_state.get(
+                    _widget_key(index, "nome_programacao"),
+                    payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
+                )
+                for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
+            }
+            _sync_calculation_program_selection(len(calc_program_options))
+            st.multiselect(
+                "Programações para calcular",
+                options=calc_program_options,
+                format_func=lambda item: calc_program_labels[item],
+                key="calc_selected_programs",
+                help=(
+                    "Por padrão, todas as programações cadastradas entram no cálculo. "
+                    "Você pode escolher só uma ou qualquer combinação entre elas."
+                ),
+            )
+            st.caption(
+                "Selecione todas para o cálculo completo do cenário, ou escolha apenas as programações que deseja simular em conjunto."
+            )
+            selected_programs = [
+                int(item)
+                for item in st.session_state.get("calc_selected_programs", calc_program_options)
+                if int(item) in calc_program_options
+            ]
+            calculation_time_errors = _collect_calculation_time_errors(selected_programs)
+            calculate_disabled = bool(calculation_time_errors)
+
+            st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
+
+            # Linha 2: modo de cálculo
+            cfg1, cfg2 = st.columns([1.25, 1.0])
             cfg1.radio(
                 "Modo de cálculo",
                 options=["fixo", "automatico"],
                 format_func=lambda item: (
-                    "Simulação com BT fixa" if item == "fixo" else "Dimensionamento automático"
+                    "Quantidade fixa definida" if item == "fixo" else "Dimensionamento automático"
                 ),
                 horizontal=True,
                 key="calc_mode",
             )
-            cfg1.caption(
-                "Fixo simula a frota informada. Automático procura a menor frota que atenda as restrições do cenário."
-            )
-            cfg2.number_input(
-                "Limite máximo de BTs no automático",
-                min_value=1,
-                step=1,
-                key="max_total_bts",
-            )
-            cfg2.caption("Usado apenas no modo automático para limitar as composições testadas.")
-            st.checkbox(
-                "Sequenciar programações por horário de início e prioridade quando houver conflito de recursos da operação",
+            if st.session_state.calc_mode == "fixo":
+                bt_fixa_summary = " | ".join(
+                    f"{calc_program_labels[index]}: {int(st.session_state.get(_widget_key(index, 'numero_bts_fixo'), 0))}"
+                    for index in selected_programs
+                )
+                cfg2.markdown(
+                    "<div class='section-helper' style='margin-top:0.55rem;margin-bottom:0;'>BT fixa definida nas programações selecionadas.</div>",
+                    unsafe_allow_html=True,
+                )
+                cfg2.caption(bt_fixa_summary or "Nenhuma programação selecionada.")
+            else:
+                cfg2.number_input(
+                    "Limite máximo de BTs no automático",
+                    min_value=1,
+                    step=1,
+                    key="max_total_bts",
+                )
+                cfg2.caption(
+                    "Limita as combinações testadas até encontrar a menor frota viável."
+                )
+
+            st.markdown("<div style='height: 0.5rem;'></div>", unsafe_allow_html=True)
+
+            # Linha 3: sequenciamento e liberação parcial
+            seq1, seq2 = st.columns([1.25, 1.0])
+            seq1.checkbox(
+                "Sequenciar por início e prioridade",
                 key="sequenciar_por_prioridade",
                 help=(
                     "Quando ativo, conflitos de mistura, dosagem, frente e BT compartilhada passam a respeitar "
                     "primeiro o horário de início e, em empate, a prioridade informada."
                 ),
             )
+            seq1.caption(
+                "Use para impor uma ordem executiva entre programações concorrentes."
+            )
+            seq2.checkbox(
+                "Permitir liberações parciais de BTs",
+                key="liberar_bt_compartilhada_parcialmente",
+                disabled=not st.session_state.sequenciar_por_prioridade,
+                help=(
+                    "Aplica-se apenas a BTs compartilhadas com sequenciamento por prioridade. "
+                    "A programação de maior prioridade mantém as BTs até esgotar todas as cargas previstas. "
+                    "Depois disso, as BTs que retornarem passam a alimentar a prioridade seguinte."
+                ),
+            )
+            seq2.caption(
+                "Repassa BTs compartilhadas após concluir a prioridade atual."
+            )
 
-            calcular = st.button("Calcular", use_container_width=True, type="primary")
+            if st.session_state.get("resultado") is not None and not calculate_disabled:
+                action_calc_col, action_reprog_col = st.columns([1, 1])
+                with action_calc_col:
+                    calcular = st.button(
+                        "Calcular",
+                        use_container_width=True,
+                        type="primary",
+                        disabled=calculate_disabled,
+                    )
+                with action_reprog_col:
+                    if st.button("Reprogramar", use_container_width=True):
+                        st.session_state.show_reprogramming_section = True
+                        st.session_state["base_result_default_tab"] = "Resumo executivo"
+                        st.rerun()
+            else:
+                calcular = st.button(
+                    "Calcular",
+                    use_container_width=True,
+                    type="primary",
+                    disabled=calculate_disabled,
+                )
+
+            if calculation_time_errors:
+                st.error("Corrija os horários inválidos para habilitar o cálculo.")
+        if st.session_state.get("resultado") is not None and st.session_state.get("show_reprogramming_section", False):
+            _render_reprogramming_section(st.session_state.resultado)
     else:
         _go_to_page("cenario")
         st.rerun()
 
     if calcular:
         try:
-            concretagens = _build_concretagens_from_form()
+            selected_programs = list(st.session_state.get("calc_selected_programs", []))
+            if not selected_programs:
+                raise ValueError("Selecione ao menos uma programação para calcular.")
+            concretagens = _build_concretagens_from_form(selected_programs)
             if st.session_state.calc_mode == "automatico":
                 resultado = calcular_dimensionamento_minimo(
                     concretagens,
                     base_date=st.session_state.current_scenario_date,
                     max_total_bts=int(st.session_state.max_total_bts),
                     sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
+                    liberar_bt_compartilhada_parcialmente=bool(
+                        st.session_state.liberar_bt_compartilhada_parcialmente
+                    ),
                 )
             else:
                 resultado = simular_ciclo_bt(
                     concretagens,
                     base_date=st.session_state.current_scenario_date,
                     sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
+                    liberar_bt_compartilhada_parcialmente=bool(
+                        st.session_state.liberar_bt_compartilhada_parcialmente
+                    ),
                 )
             st.session_state.resultado = resultado
+            st.session_state.last_calculated_signature = _current_calculation_signature()
+            st.session_state.show_reprogramming_section = False
+            st.session_state.resultado_reprogramado = None
+            st.session_state.reprogramacao_meta = None
+            st.session_state["base_result_default_tab"] = "Gantt operacional"
+            st.rerun()
         except Exception as exc:
             st.session_state.resultado = None
+            st.session_state.last_calculated_signature = ""
+            st.session_state.show_reprogramming_section = False
+            st.session_state.resultado_reprogramado = None
+            st.session_state.reprogramacao_meta = None
             st.error(str(exc))
 
+    if current_page == "planejamento" and _has_active_scenario():
+        _autosave_current_scenario_if_needed()
+
     if current_page == "planejamento" and st.session_state.get("resultado") is not None:
-        _render_result(st.session_state.resultado)
+        st.markdown("<div class='main-section-gap'></div>", unsafe_allow_html=True)
+        _render_result(
+            st.session_state.resultado,
+            widget_prefix="base",
+            expanded=not bool(st.session_state.get("show_reprogramming_section", False)),
+        )
+        if st.session_state.get("resultado_reprogramado") is not None:
+            meta = st.session_state.get("reprogramacao_meta") or {}
+            helper_parts = ["Resultado recalculado a partir de marco observado do ciclo."]
+            if meta.get("programacao"):
+                helper_parts.append(
+                    f"Programação: {meta['programacao']} | Viagem: V{int(meta['numero_viagem']):02d}"
+                )
+            if meta.get("reference_label"):
+                helper_parts.append(f"Marco: {meta['reference_label']}")
+            if meta.get("planned_reference") and meta.get("observed_reference"):
+                helper_parts.append(
+                    "Planejado: "
+                    f"{format_clock(meta['planned_reference'], st.session_state.resultado.data_base)} | "
+                    "Observado: "
+                    f"{format_clock(meta['observed_reference'], st.session_state.resultado.data_base)} | "
+                    "Desvio: "
+                    f"{round_minutes(meta['delta_minutes'], 1)} min"
+                )
+            observed_label = (
+                f"Marco observado: {meta['reference_label'].lower()}"
+                if meta.get("reference_label")
+                else "Marco observado"
+            )
+            _render_result(
+                st.session_state.resultado_reprogramado,
+                section_title="Seção 3A — Resultados da reprogramação",
+                helper_text=" ".join(helper_parts),
+                widget_prefix="reprog",
+                gantt_observed_marker=(
+                    {
+                        "observed_reference": meta.get("observed_reference"),
+                        "label": observed_label,
+                    }
+                    if meta.get("observed_reference") is not None
+                    else None
+                ),
+            )
 
 
 if __name__ == "__main__":
