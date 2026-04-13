@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 from copy import deepcopy
@@ -12,7 +13,9 @@ import streamlit.components.v1 as components
 
 from calculator.engine import calcular_dimensionamento_minimo, simular_ciclo_bt
 from calculator.gantt import (
+    gerar_disponibilidade_bt,
     gerar_disponibilidade_bt_interativa,
+    gerar_gantt,
     gerar_gantt_interativo,
     gerar_tabela_disponibilidade_bt,
 )
@@ -65,6 +68,93 @@ def _inject_styles() -> None:
             margin-top: -0.35rem;
             margin-bottom: 0.9rem;
         }
+        .page-title-block {
+            margin-bottom: 0.95rem;
+        }
+        .page-title-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+        .page-title-text {
+            font-size: 2.15rem;
+            line-height: 1.06;
+            font-weight: 700;
+            margin: 0;
+            color: inherit;
+        }
+        .page-title-subtitle {
+            color: #5f6b7a;
+            font-size: 0.95rem;
+            margin-top: 0.25rem;
+        }
+        .page-title-help {
+            display: none;
+            flex: 0 0 auto;
+        }
+        .page-title-help details {
+            position: relative;
+        }
+        .page-title-help summary {
+            list-style: none;
+            width: 1.8rem;
+            height: 1.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            border: 1px solid rgba(127, 127, 127, 0.18);
+            background: rgba(127, 127, 127, 0.05);
+            color: #6b7280;
+            font-weight: 700;
+            cursor: pointer;
+            user-select: none;
+        }
+        .page-title-help summary::-webkit-details-marker {
+            display: none;
+        }
+        .page-title-help .body {
+            position: absolute;
+            right: 0;
+            top: 2.15rem;
+            z-index: 5;
+            width: min(78vw, 320px);
+            padding: 0.7rem 0.8rem;
+            border-radius: 10px;
+            border: 1px solid rgba(127, 127, 127, 0.18);
+            background: var(--secondary-background-color, #eef2f7);
+            color: var(--text-color, #0f172a);
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.14);
+            font-size: 0.88rem;
+            line-height: 1.4;
+        }
+        .mobile-info-helper {
+            display: none;
+            margin: -0.2rem 0 0.85rem 0;
+        }
+        .mobile-info-helper details {
+            border: 1px solid rgba(128, 128, 128, 0.16);
+            border-radius: 10px;
+            padding: 0.12rem 0.75rem;
+            background: rgba(127, 127, 127, 0.035);
+        }
+        .mobile-info-helper summary {
+            cursor: pointer;
+            list-style: none;
+            font-size: 0.9rem;
+            color: #7c8796;
+            font-weight: 600;
+        }
+        .mobile-info-helper summary::-webkit-details-marker {
+            display: none;
+        }
+        .mobile-info-helper .body {
+            font-size: 0.88rem;
+            color: #9aa6b6;
+            line-height: 1.4;
+            padding: 0.45rem 0 0.25rem 0;
+        }
         .page-separator {
             height: 1px;
             background: rgba(255, 255, 255, 0.1);
@@ -88,20 +178,61 @@ def _inject_styles() -> None:
             color: #5f6b7a;
             font-size: 0.94rem;
         }
+        .stApp,
+        html,
+        body {
+            --result-surface-bg: var(--secondary-background-color, #eef2f7);
+            --result-surface-title: var(--text-color, #0f172a);
+            --result-surface-label: color-mix(
+                in srgb,
+                var(--text-color, #0f172a) 82%,
+                var(--background-color, #ffffff) 18%
+            );
+            --result-surface-text: color-mix(
+                in srgb,
+                var(--text-color, #0f172a) 74%,
+                var(--background-color, #ffffff) 26%
+            );
+            --result-box-bg: var(--secondary-background-color, #eef2f7);
+            --result-box-title: var(--text-color, #0f172a);
+            --result-box-subtitle: color-mix(
+                in srgb,
+                var(--text-color, #0f172a) 74%,
+                var(--background-color, #ffffff) 26%
+            );
+            --result-box-text: color-mix(
+                in srgb,
+                var(--text-color, #0f172a) 78%,
+                var(--background-color, #ffffff) 22%
+            );
+            --result-note-bg: var(--secondary-background-color, #eef2f7);
+            --result-note-title: var(--text-color, #0f172a);
+            --result-note-text: color-mix(
+                in srgb,
+                var(--text-color, #0f172a) 78%,
+                var(--background-color, #ffffff) 22%
+            );
+        }
         .result-status-card {
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            border-left: 4px solid rgba(255, 255, 255, 0.18);
+            --card-border: color-mix(in srgb, var(--text-color, #ffffff) 12%, transparent);
+            --card-accent: rgba(255, 255, 255, 0.18);
+            border: 1px solid var(--card-border);
+            border-left: 4px solid var(--card-accent);
             border-radius: 12px;
             padding: 0.8rem 0.9rem;
-            min-height: 92px;
-            background: #1e2633;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+            height: 178px;
+            background: var(--result-surface-bg, #1e2633);
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
         .result-status-card .label {
             font-size: 0.78rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            color: rgba(255, 255, 255, 0.82);
+            color: var(--result-surface-label, var(--text-color, #ffffff));
+            opacity: 0.82;
             margin-bottom: 0.3rem;
         }
         .result-status-card .value {
@@ -109,23 +240,34 @@ def _inject_styles() -> None:
             font-weight: 700;
             line-height: 1.15;
             margin-bottom: 0.2rem;
-            color: #ffffff;
+            color: var(--result-surface-title, var(--text-color, #ffffff));
         }
         .result-status-card .subvalue {
             font-size: 0.88rem;
-            color: rgba(255, 255, 255, 0.88);
+            color: var(--result-surface-text, var(--text-color, #ffffff));
+            opacity: 0.88;
+            margin-top: auto;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 4;
+            line-clamp: 4;
         }
         .result-status-card.ok {
-            border-left-color: rgba(76, 175, 80, 0.82);
+            --card-border: rgba(76, 175, 80, 0.34);
+            --card-accent: rgba(76, 175, 80, 0.88);
         }
         .result-status-card.warn {
-            border-left-color: rgba(255, 167, 38, 0.82);
+            --card-border: rgba(255, 167, 38, 0.34);
+            --card-accent: rgba(255, 167, 38, 0.88);
         }
         .result-status-card.bad {
-            border-left-color: rgba(239, 83, 80, 0.82);
+            --card-border: rgba(239, 83, 80, 0.34);
+            --card-accent: rgba(239, 83, 80, 0.88);
         }
         .result-status-card.info {
-            border-left-color: rgba(100, 181, 246, 0.82);
+            --card-border: rgba(37, 99, 235, 0.34);
+            --card-accent: rgba(37, 99, 235, 0.92);
         }
         .result-kicker {
             font-size: 0.84rem;
@@ -133,21 +275,25 @@ def _inject_styles() -> None:
             margin-bottom: 0.85rem;
         }
         .result-box {
-            border: 1px solid rgba(128, 128, 128, 0.16);
+            border: 1px solid rgba(148, 163, 184, 0.18);
             border-radius: 12px;
             padding: 0.85rem 1rem;
-            background: rgba(127, 127, 127, 0.04);
-            margin: 0.75rem 0 1rem 0;
+            background: var(--result-box-bg, #1f2937);
+            color: var(--result-box-text, #e5edf7);
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+            margin: 0 0 1rem 0;
         }
         .result-box .title {
             font-size: 0.9rem;
             font-weight: 700;
             margin-bottom: 0.45rem;
+            color: var(--result-box-title, #f8fafc);
         }
         .result-box .subtitle {
             font-size: 0.8rem;
             font-weight: 700;
-            color: rgba(255, 255, 255, 0.82);
+            color: var(--result-box-subtitle, #cbd5e1);
+            opacity: 0.82;
             margin: 0.55rem 0 0.25rem 0;
             text-transform: uppercase;
             letter-spacing: 0.03em;
@@ -161,82 +307,108 @@ def _inject_styles() -> None:
             line-height: 1.45;
         }
         .result-inline-note {
-            border: 1px solid rgba(128, 128, 128, 0.16);
+            border: 1px solid rgba(148, 163, 184, 0.18);
             border-radius: 10px;
             padding: 0.7rem 0.9rem;
-            background: rgba(127, 127, 127, 0.035);
+            background: var(--result-box-bg, #1f2937);
+            color: var(--result-box-text, #e5edf7);
             margin: 0.55rem 0 0.2rem 0;
         }
         .result-inline-note .title {
             font-size: 0.84rem;
             font-weight: 700;
             margin-bottom: 0.2rem;
+            color: var(--result-box-title, #f8fafc);
         }
         .result-inline-note .body {
             font-size: 0.93rem;
             line-height: 1.45;
+            color: var(--result-box-text, #e5edf7);
+            opacity: 0.9;
         }
         .result-linked-note {
             margin: 0.5rem 0 0 0;
             padding: 0.6rem 0.75rem;
+            border: 1px solid rgba(148, 163, 184, 0.18);
             border-left: 3px solid rgba(255, 255, 255, 0.22);
             border-radius: 0 10px 10px 0;
-            background: #273142;
+            background: var(--result-note-bg, #273142);
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
         }
         .result-linked-note .title {
             font-size: 0.8rem;
             font-weight: 700;
             margin-bottom: 0.18rem;
-            color: #ffffff;
+            color: var(--result-note-title, #ffffff);
         }
         .result-linked-note .body {
             font-size: 0.86rem;
             line-height: 1.42;
-            color: #dbe4f0;
+            color: var(--result-note-text, #dbe4f0);
+            opacity: 0.9;
         }
         .result-linked-note.ok {
             border-left-color: #52b36a;
-            background: #23422c;
         }
         .result-linked-note.warn {
             border-left-color: #d89224;
-            background: #4b3a1f;
         }
         .result-linked-note.bad {
             border-left-color: #d95a57;
-            background: #4a2b2e;
         }
         .result-linked-note.info {
             border-left-color: #5ba8e8;
-            background: #2d4058;
         }
         .result-mini-card {
             border: 1px solid #3b475c;
             border-radius: 10px;
             padding: 0.7rem 0.85rem;
             min-height: 82px;
-            background: #273142;
+            background: var(--result-note-bg, #273142);
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16);
         }
         .result-mini-card .label {
             font-size: 0.8rem;
-            color: #cbd5e1;
+            color: var(--text-color, #cbd5e1);
+            opacity: 0.82;
             margin-bottom: 0.28rem;
         }
         .result-mini-card .value {
             font-size: 1.1rem;
             font-weight: 700;
-            color: #ffffff;
+            color: var(--text-color, #ffffff);
             line-height: 1.1;
         }
         .result-mini-card .subvalue {
             margin-top: 0.22rem;
             font-size: 0.82rem;
-            color: #dbe4f0;
+            color: var(--text-color, #dbe4f0);
+            opacity: 0.9;
         }
         .result-row-gap {
             height: 0.8rem;
+        }
+        .element-container:has(.mobile-static-planning-marker),
+        .element-container:has(.mobile-static-planning-marker) + .element-container,
+        .element-container:has(.mobile-static-disponibilidade-marker),
+        .element-container:has(.mobile-static-disponibilidade-marker) + .element-container {
+            display: none !important;
+        }
+        .element-container:has(.desktop-plotly-planning-marker),
+        .element-container:has(.desktop-plotly-disponibilidade-marker) {
+            display: none !important;
+        }
+        .element-container:has(.scenario-meta-expander-marker) + div[data-testid="stExpander"] details {
+            border: none !important;
+            background: transparent !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+        }
+        .element-container:has(.scenario-meta-expander-marker) + div[data-testid="stExpander"] summary {
+            display: none !important;
+        }
+        .element-container:has(.scenario-meta-expander-marker) + div[data-testid="stExpander"] > div {
+            margin-top: 0 !important;
         }
         div[data-testid="stButton"] button[kind="primary"] {
             background: #1f5f33;
@@ -264,60 +436,107 @@ def _inject_styles() -> None:
             text-overflow: unset !important;
             white-space: nowrap !important;
         }
-        @media (prefers-color-scheme: light) {
-            .section-helper,
-            .result-kicker,
-            .scenario-meta-preview {
-                color: #4b5563;
-            }
-            .result-status-card {
-                border-color: rgba(15, 23, 42, 0.12);
-                border-left-color: rgba(148, 163, 184, 0.9);
-                background: #f7f8fa;
-                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-            }
-            .result-status-card .label {
-                color: rgba(17, 24, 39, 0.82);
-            }
-            .result-status-card .value {
-                color: #111827;
-            }
-            .result-status-card .subvalue {
-                color: rgba(17, 24, 39, 0.76);
-            }
-            .result-status-card.ok {
-                border-left-color: rgba(46, 125, 50, 0.8);
-            }
-            .result-status-card.warn {
-                border-left-color: rgba(180, 83, 9, 0.8);
-            }
-            .result-status-card.bad {
-                border-left-color: rgba(185, 28, 28, 0.8);
-            }
-            .result-status-card.info {
-                border-left-color: rgba(37, 99, 235, 0.78);
-            }
-            .result-box {
-                border-color: rgba(15, 23, 42, 0.12);
-                background: #f7f8fa;
-            }
-            .result-box .subtitle {
-                color: #374151;
-            }
-            .result-inline-note {
-                border-color: rgba(15, 23, 42, 0.12);
-                background: #f7f8fa;
-            }
+        .stApp[data-codex-theme="light"] .section-helper,
+        .stApp[data-codex-theme="light"] .result-kicker,
+        .stApp[data-codex-theme="light"] .scenario-meta-preview,
+        body[data-codex-theme="light"] .section-helper,
+        body[data-codex-theme="light"] .result-kicker,
+        body[data-codex-theme="light"] .scenario-meta-preview,
+        html[data-codex-theme="light"] .section-helper,
+        html[data-codex-theme="light"] .result-kicker,
+        html[data-codex-theme="light"] .scenario-meta-preview {
+            color: #4b5563;
+        }
+        .stApp[data-codex-theme="light"] .result-status-card,
+        .stApp[data-codex-theme="light"] .result-box,
+        .stApp[data-codex-theme="light"] .result-inline-note,
+        .stApp[data-codex-theme="light"] .result-linked-note,
+        .stApp[data-codex-theme="light"] .result-mini-card,
+        body[data-codex-theme="light"] .result-status-card,
+        body[data-codex-theme="light"] .result-box,
+        body[data-codex-theme="light"] .result-inline-note,
+        body[data-codex-theme="light"] .result-linked-note,
+        body[data-codex-theme="light"] .result-mini-card,
+        html[data-codex-theme="light"] .result-status-card,
+        html[data-codex-theme="light"] .result-box,
+        html[data-codex-theme="light"] .result-inline-note,
+        html[data-codex-theme="light"] .result-linked-note,
+        html[data-codex-theme="light"] .result-mini-card {
+            background: var(--secondary-background-color, #eef2f7);
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+        }
+        .stApp[data-codex-theme="light"] .result-status-card .label,
+        .stApp[data-codex-theme="light"] .result-kicker,
+        .stApp[data-codex-theme="light"] .result-box .subtitle,
+        .stApp[data-codex-theme="light"] .result-mini-card .label,
+        body[data-codex-theme="light"] .result-status-card .label,
+        body[data-codex-theme="light"] .result-kicker,
+        body[data-codex-theme="light"] .result-box .subtitle,
+        body[data-codex-theme="light"] .result-mini-card .label,
+        html[data-codex-theme="light"] .result-status-card .label,
+        html[data-codex-theme="light"] .result-kicker,
+        html[data-codex-theme="light"] .result-box .subtitle,
+        html[data-codex-theme="light"] .result-mini-card .label {
+            color: #5f6b7a;
+        }
+        .stApp[data-codex-theme="light"] .result-status-card .value,
+        .stApp[data-codex-theme="light"] .result-box .title,
+        .stApp[data-codex-theme="light"] .result-inline-note .title,
+        .stApp[data-codex-theme="light"] .result-linked-note .title,
+        .stApp[data-codex-theme="light"] .result-mini-card .value,
+        body[data-codex-theme="light"] .result-status-card .value,
+        body[data-codex-theme="light"] .result-box .title,
+        body[data-codex-theme="light"] .result-inline-note .title,
+        body[data-codex-theme="light"] .result-linked-note .title,
+        body[data-codex-theme="light"] .result-mini-card .value,
+        html[data-codex-theme="light"] .result-status-card .value,
+        html[data-codex-theme="light"] .result-box .title,
+        html[data-codex-theme="light"] .result-inline-note .title,
+        html[data-codex-theme="light"] .result-linked-note .title,
+        html[data-codex-theme="light"] .result-mini-card .value {
+            color: #0f172a;
+        }
+        .stApp[data-codex-theme="light"] .result-status-card .subvalue,
+        .stApp[data-codex-theme="light"] .result-box,
+        .stApp[data-codex-theme="light"] .result-inline-note .body,
+        .stApp[data-codex-theme="light"] .result-linked-note .body,
+        .stApp[data-codex-theme="light"] .result-mini-card .subvalue,
+        body[data-codex-theme="light"] .result-status-card .subvalue,
+        body[data-codex-theme="light"] .result-box,
+        body[data-codex-theme="light"] .result-inline-note .body,
+        body[data-codex-theme="light"] .result-linked-note .body,
+        body[data-codex-theme="light"] .result-mini-card .subvalue,
+        html[data-codex-theme="light"] .result-status-card .subvalue,
+        html[data-codex-theme="light"] .result-box,
+        html[data-codex-theme="light"] .result-inline-note .body,
+        html[data-codex-theme="light"] .result-linked-note .body,
+        html[data-codex-theme="light"] .result-mini-card .subvalue {
+            color: #475569;
         }
         @media (max-width: 768px) {
+            .mobile-hidden,
+            .page-title-subtitle {
+                display: none !important;
+            }
+            .mobile-info-helper,
+            .page-title-help {
+                display: block;
+            }
             .block-container {
                 padding-left: 0.8rem !important;
                 padding-right: 0.8rem !important;
                 padding-top: 1rem !important;
             }
-            .stApp h1 {
+            .page-title-block {
+                margin-bottom: 0.78rem;
+            }
+            .page-title-row {
+                gap: 0.55rem;
+            }
+            .page-title-text {
                 font-size: 1.72rem !important;
                 line-height: 1.08;
+                flex: 1 1 auto;
             }
             .stApp h2 {
                 font-size: 1.28rem !important;
@@ -376,6 +595,76 @@ def _inject_styles() -> None:
             div[data-testid="stButton"] button {
                 width: 100%;
             }
+            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] {
+                gap: 0.45rem !important;
+                row-gap: 0.45rem !important;
+                flex-wrap: wrap !important;
+            }
+            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
+                width: 100% !important;
+                min-width: 100% !important;
+                flex: 1 1 100% !important;
+            }
+            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:first-child) {
+                width: calc(50% - 0.25rem) !important;
+                min-width: calc(50% - 0.25rem) !important;
+                flex: 1 1 calc(50% - 0.25rem) !important;
+            }
+            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] button {
+                font-size: 0.83rem !important;
+                min-height: 2.45rem;
+                padding-left: 0.35rem !important;
+                padding-right: 0.35rem !important;
+                white-space: normal !important;
+                line-height: 1.12 !important;
+            }
+            .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"],
+            .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"],
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] {
+                gap: 0.45rem !important;
+                row-gap: 0.45rem !important;
+                flex-wrap: wrap !important;
+            }
+            .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+            .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+                width: calc(50% - 0.25rem) !important;
+                min-width: calc(50% - 0.25rem) !important;
+                flex: 1 1 calc(50% - 0.25rem) !important;
+            }
+            .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"] button,
+            .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"] button,
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] button {
+                font-size: 0.83rem !important;
+                min-height: 2.45rem;
+                padding-left: 0.35rem !important;
+                padding-right: 0.35rem !important;
+                white-space: normal !important;
+                line-height: 1.12 !important;
+            }
+            .element-container:has(.scenario-meta-expander-marker) + div[data-testid="stExpander"] summary {
+                display: flex !important;
+            }
+            .element-container:has(.scenario-meta-expander-marker) + div[data-testid="stExpander"] details {
+                border-radius: 12px !important;
+                border: 1px solid rgba(148, 163, 184, 0.16) !important;
+                background: rgba(127, 127, 127, 0.03) !important;
+                padding: 0 !important;
+            }
+            .element-container:has(.desktop-plotly-planning-marker),
+            .element-container:has(.desktop-plotly-planning-marker) + .element-container,
+            .element-container:has(.desktop-plotly-disponibilidade-marker),
+            .element-container:has(.desktop-plotly-disponibilidade-marker) + .element-container {
+                display: none !important;
+            }
+            .element-container:has(.mobile-static-planning-marker),
+            .element-container:has(.mobile-static-disponibilidade-marker) {
+                display: none !important;
+            }
+            .element-container:has(.mobile-static-planning-marker) + .element-container,
+            .element-container:has(.mobile-static-disponibilidade-marker) + .element-container {
+                display: block !important;
+            }
             .result-status-card,
             .result-mini-card,
             .result-box,
@@ -385,7 +674,7 @@ def _inject_styles() -> None:
             }
             .result-status-card,
             .result-mini-card {
-                min-height: unset;
+                height: 162px;
             }
             .result-status-card .value {
                 font-size: 1.15rem;
@@ -476,9 +765,155 @@ def _disable_saved_scenario_search() -> None:
     )
 
 
+def _sync_theme_marker() -> None:
+    components.html(
+        """
+        <script>
+        const parseColor = (value) => {
+          if (!value) return null;
+          const rgbMatch = value.trim().match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+          if (rgbMatch) {
+            return [Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3])];
+          }
+          const hexMatch = value.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+          if (hexMatch) {
+            const raw = hexMatch[1];
+            const hex = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+            return [
+              parseInt(hex.slice(0, 2), 16),
+              parseInt(hex.slice(2, 4), 16),
+              parseInt(hex.slice(4, 6), 16),
+            ];
+          }
+          return null;
+        };
+
+        const luminance = ([r, g, b]) => {
+          const norm = [r, g, b].map((channel) => {
+            const value = channel / 255;
+            return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * norm[0] + 0.7152 * norm[1] + 0.0722 * norm[2];
+        };
+
+        const syncTheme = () => {
+          const localRoot = document.documentElement;
+          const localBody = document.body;
+          const stApp = document.querySelector('.stApp');
+          const parentDoc = window.parent.document;
+          const root = parentDoc.documentElement;
+          const body = parentDoc.body;
+          const localStyles = window.getComputedStyle(localRoot);
+          const parentStyles = window.parent.getComputedStyle(root);
+          const stAppStyles = stApp ? window.getComputedStyle(stApp) : null;
+          const textCandidates = [
+            localStyles.getPropertyValue('--text-color'),
+            stAppStyles ? stAppStyles.color : '',
+            window.getComputedStyle(localBody).color,
+            parentStyles.getPropertyValue('--text-color'),
+            window.parent.getComputedStyle(body).color,
+          ];
+          const colorCandidates = [
+            stAppStyles ? stAppStyles.backgroundColor : '',
+            localStyles.getPropertyValue('--background-color'),
+            localStyles.getPropertyValue('--secondary-background-color'),
+            window.getComputedStyle(localBody).backgroundColor,
+            parentStyles.getPropertyValue('--background-color'),
+            parentStyles.getPropertyValue('--secondary-background-color'),
+            window.parent.getComputedStyle(body).backgroundColor,
+          ];
+          const textValue = textCandidates.find((value) => parseColor(value));
+          const textRgb = parseColor(textValue);
+          const colorValue = colorCandidates.find((value) => parseColor(value));
+          const rgb = parseColor(colorValue);
+          if (!textRgb && !rgb) return;
+          const theme = textRgb
+            ? luminance(textRgb) < 0.45
+              ? 'light'
+              : 'dark'
+            : luminance(rgb) > 0.45
+              ? 'light'
+              : 'dark';
+          body.setAttribute('data-codex-theme', theme);
+          root.setAttribute('data-codex-theme', theme);
+          localBody.setAttribute('data-codex-theme', theme);
+          localRoot.setAttribute('data-codex-theme', theme);
+          if (stApp) {
+            stApp.setAttribute('data-codex-theme', theme);
+          }
+        };
+
+        syncTheme();
+        setTimeout(syncTheme, 50);
+        setTimeout(syncTheme, 250);
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _render_section_heading(title: str, helper_text: str) -> None:
     st.subheader(title)
     st.markdown(f"<div class='section-helper'>{helper_text}</div>", unsafe_allow_html=True)
+
+
+def _render_mobile_info_helper(helper_text: str, summary_text: str = "Sobre esta tela") -> None:
+    st.markdown(
+        (
+            "<div class='mobile-info-helper'>"
+            f"<details><summary>{summary_text}</summary>"
+            f"<div class='body'>{helper_text}</div>"
+            "</details>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _sync_expander_open_state(label_text: str, storage_key: str, mobile_default_open: bool) -> None:
+    label_json = json.dumps(label_text, ensure_ascii=False)
+    storage_json = json.dumps(storage_key, ensure_ascii=False)
+    mobile_default = "true" if mobile_default_open else "false"
+    components.html(
+        f"""
+        <script>
+        const expanderLabel = {label_json};
+        const storageKey = {storage_json};
+        const mobileDefaultOpen = {mobile_default};
+
+        const findExpanderDetails = () => {{
+          const detailsList = Array.from(window.parent.document.querySelectorAll('div[data-testid="stExpander"] details'));
+          return detailsList.find((details) => {{
+            const summaryText = (details.querySelector('summary')?.textContent || '').trim();
+            return summaryText === expanderLabel;
+          }});
+        }};
+
+        const syncExpander = () => {{
+          const details = findExpanderDetails();
+          if (!details) return;
+          const isMobile = window.parent.innerWidth <= 768;
+          const stored = window.parent.sessionStorage.getItem(storageKey);
+
+          if (stored === null) {{
+            details.open = isMobile ? mobileDefaultOpen : true;
+            window.parent.sessionStorage.setItem(storageKey, details.open ? '1' : '0');
+          }} else {{
+            details.open = stored === '1';
+          }}
+
+          if (details.dataset.openStateBound === 'true') return;
+          details.dataset.openStateBound = 'true';
+          details.addEventListener('toggle', () => {{
+            window.parent.sessionStorage.setItem(storageKey, details.open ? '1' : '0');
+          }});
+        }};
+
+        setTimeout(syncExpander, 80);
+        </script>
+        """,
+        height=0,
+    )
 
 
 def _render_subsection_heading(title: str, helper_text: str) -> None:
@@ -679,6 +1114,13 @@ def _render_active_scenario_box() -> None:
     )
 
 
+def _render_program_tabs_anchor() -> None:
+    st.markdown(
+        "<div class='codex-program-tabs-anchor' style='height:0; margin:0; padding:0;'></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def _default_payload(index: int) -> dict:
     return {
         "id": f"concretagem-{index}",
@@ -828,11 +1270,19 @@ def _render_time_text_input(
 def _program_display_name(index: int) -> str:
     payloads = st.session_state.get("scenario_payloads", [])
     payload = payloads[index - 1] if 0 < index <= len(payloads) else {}
+    return _current_program_name(index, payload)
+
+
+def _current_program_name(index: int, payload: dict | None = None) -> str:
+    payload = payload or {}
+    elemento_frente = str(st.session_state.get(_widget_key(index, "elemento_frente"), "")).strip()
+    if elemento_frente:
+        return elemento_frente
+    nome_programacao = str(st.session_state.get(_widget_key(index, "nome_programacao"), "")).strip()
+    if nome_programacao:
+        return nome_programacao
     return str(
-        st.session_state.get(
-            _widget_key(index, "nome_programacao"),
-            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
-        )
+        payload.get("elemento_frente") or payload.get("nome_programacao") or f"Programação {index}"
     ).strip() or f"Programação {index}"
 
 
@@ -1634,12 +2084,11 @@ def _process_pending_program_action() -> None:
     if action_type == "duplicate":
         duplicated_payload = deepcopy(payloads[index])
         existing_names = [
-            (item.get("elemento_frente") or item.get("nome_programacao", "")).strip()
-            for item in payloads
+            _current_program_name(item_index, item)
+            for item_index, item in enumerate(payloads, start=1)
         ]
         duplicated_name = _next_program_copy_name(
-            duplicated_payload.get("elemento_frente")
-            or duplicated_payload.get("nome_programacao", f"Programação {index + 1}"),
+            _current_program_name(index + 1, duplicated_payload),
             existing_names,
         )
         duplicated_payload["nome_programacao"] = duplicated_name
@@ -1764,27 +2213,18 @@ def _sync_active_program_from_query(total_programs: int) -> None:
 
 
 def _render_program_tab_tracking() -> None:
-    tab_labels = [
-        st.session_state.get(
-            _widget_key(index, "nome_programacao"),
-            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
-        )
-        for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
-    ]
-    labels_json = json.dumps(tab_labels, ensure_ascii=False)
     components.html(
-        f"""
+        """
         <script>
-        const expectedLabels = {labels_json};
         const storageKey = "codex_active_program_index";
         const findProgramTablist = () => {{
+          const anchors = Array.from(window.parent.document.querySelectorAll('.codex-program-tabs-anchor'));
+          const anchor = anchors.length ? anchors[anchors.length - 1] : null;
+          if (!anchor) return null;
           const tablists = Array.from(window.parent.document.querySelectorAll('[role="tablist"]'));
-          return tablists.find((tablist) => {{
-            const labels = Array.from(tablist.querySelectorAll('button[role="tab"]'))
-              .map((button) => (button.textContent || '').trim());
-            if (labels.length !== expectedLabels.length) return false;
-            return expectedLabels.every((label, index) => labels[index] === label);
-          }});
+          return tablists.find((tablist) =>
+            Boolean(anchor.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING)
+          );
         }};
 
         const bindProgramTabs = () => {{
@@ -1822,32 +2262,23 @@ def _render_active_program_focus() -> None:
         target_index = st.session_state.get("active_program_index", 0)
     target_index = int(target_index or 0)
 
-    tab_labels = [
-        st.session_state.get(
-            _widget_key(index, "nome_programacao"),
-            payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
-        )
-        for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
-    ]
-    labels_json = json.dumps(tab_labels, ensure_ascii=False)
-    target_index = max(0, min(target_index, len(tab_labels) - 1))
+    target_index = max(0, min(target_index, len(st.session_state.scenario_payloads) - 1))
     st.session_state.active_program_index = target_index
     st.query_params["programa"] = str(target_index)
     components.html(
         f"""
         <script>
-        const expectedLabels = {labels_json};
         const targetIndex = {int(target_index)};
         const forceTargetIndex = {str(force_target_index).lower()};
         const storageKey = "codex_active_program_index";
         const findProgramTablist = () => {{
+          const anchors = Array.from(window.parent.document.querySelectorAll('.codex-program-tabs-anchor'));
+          const anchor = anchors.length ? anchors[anchors.length - 1] : null;
+          if (!anchor) return null;
           const tablists = Array.from(window.parent.document.querySelectorAll('[role="tablist"]'));
-          return tablists.find((tablist) => {{
-            const labels = Array.from(tablist.querySelectorAll('button[role="tab"]'))
-              .map((button) => (button.textContent || '').trim());
-            if (labels.length !== expectedLabels.length) return false;
-            return expectedLabels.every((label, index) => labels[index] === label);
-          }});
+          return tablists.find((tablist) =>
+            Boolean(anchor.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING)
+          );
         }};
 
         const resolveTargetIndex = () => {{
@@ -2077,6 +2508,7 @@ def _render_scenario_form(index: int, payload: dict) -> None:
         cfg3.checkbox(
             "Controlar intervalo",
             key=_widget_key(index, "existe_intervalo_maximo_entre_descargas"),
+            help="Ative quando quiser limitar o tempo máximo permitido entre uma descarga e a próxima.",
         )
         cfg4.number_input(
             "Intervalo máx. descargas (min)",
@@ -2109,16 +2541,19 @@ def _render_scenario_form(index: int, payload: dict) -> None:
             min_value=1,
             step=1,
             key=_widget_key(index, "max_bts_mistura"),
+            help="Quantidade máxima de BTs que podem estar simultaneamente na etapa de mistura.",
         )
         us3.number_input(
             "BTs dosagem",
             min_value=1,
             step=1,
             key=_widget_key(index, "max_bts_dosagem"),
+            help="Quantidade máxima de BTs que podem estar simultaneamente na etapa de dosagem.",
         )
         us4.checkbox(
             "Intervalo entre misturas",
             key=_widget_key(index, "existe_intervalo_entre_misturas"),
+            help="Ative para impor um espaçamento fixo entre o início de uma mistura e a próxima.",
         )
         us5.number_input(
             "Intervalo mistura (min)",
@@ -2147,10 +2582,12 @@ def _render_scenario_form(index: int, payload: dict) -> None:
         add1.checkbox(
             "Última viagem parcial proporcional",
             key=_widget_key(index, "ultima_viagem_parcial_proporcional"),
+            help="Quando o volume final for menor que a capacidade da BT, ajusta a última viagem de forma proporcional ao ciclo.",
         )
         add2.checkbox(
             "Permitir 1ª viagem customizada",
             key=_widget_key(index, "permitir_primeira_viagem_customizada"),
+            help="Use quando a primeira viagem precisar sair com um volume diferente do padrão das demais viagens.",
         )
         add3.number_input(
             "Volume 1ª viagem (m³)",
@@ -2539,11 +2976,44 @@ def _render_result(
             for key, count in resultado.bt_counts.items()
             for label in [resultado.bt_group_labels[key]]
         )
+        prazo_labels = sorted(
+            {
+                format_clock(resumo["prazo_raw"], resultado.data_base)
+                for resumo in resultado.resumo
+                if resumo.get("prazo_raw") is not None
+            }
+        )
+        intervalo_labels = sorted(
+            {
+                f"{round_minutes(resumo['intervalo_maximo_descargas_min'], 1)} min"
+                for resumo in resultado.resumo
+                if resumo.get("intervalo_maximo_descargas_min") is not None
+            }
+        )
+        intervalo_atingido_labels = sorted(
+            {
+                f"{round_minutes(resumo['maior_intervalo_descargas_min'], 1)} min"
+                for resumo in resultado.resumo
+                if resumo.get("maior_intervalo_descargas_min") is not None
+            }
+        )
+        intervalo_configurado_text = ", ".join(intervalo_labels) if intervalo_labels else "-"
+        intervalo_atingido_text = ", ".join(intervalo_atingido_labels) if intervalo_atingido_labels else "-"
         prazo_configurado = any(resumo.get("prazo_raw") is not None for resumo in resultado.resumo)
         restricao_intervalo_ativa = any(
             resumo.get("intervalo_maximo_descargas_min") is not None
             for resumo in resultado.resumo
         )
+        continuidade_por_programacao = [
+            (
+                resumo.get("nome_programacao", "Programação"),
+                f"{round_minutes(resumo['intervalo_maximo_descargas_min'], 1)} min",
+                f"{round_minutes(resumo['maior_intervalo_descargas_min'], 1)} min",
+            )
+            for resumo in resultado.resumo
+            if resumo.get("intervalo_maximo_descargas_min") is not None
+            and resumo.get("maior_intervalo_descargas_min") is not None
+        ]
         bts_sugeridas_continuidade = [
             int(resumo["bts_sugeridas_continuidade"])
             for resumo in resultado.resumo
@@ -2578,7 +3048,9 @@ def _render_result(
                     else "Não atende"
                 ) if prazo_configurado else "N/A",
                 (
-                    f"Última descarga: {format_clock(resultado.termino_ultima_descarga, resultado.data_base)}"
+                    "Prazo limite: "
+                    + ", ".join(prazo_labels)
+                    + f"<br>Última descarga: {format_clock(resultado.termino_ultima_descarga, resultado.data_base)}"
                     if prazo_configurado
                     else "Nenhum prazo de descarga foi informado"
                 ),
@@ -2593,7 +3065,10 @@ def _render_result(
             continuidade_sub = (
                 "Sem restrição configurada"
                 if not restricao_intervalo_ativa
-                else "Intervalo entre descargas verificado"
+                else "<br>".join(
+                    f"{nome}: limite {configurado} | maior {atingido}"
+                    for nome, configurado, atingido in continuidade_por_programacao
+                )
             )
             _render_result_status_card(
                 "Continuidade operacional",
@@ -2602,10 +3077,13 @@ def _render_result(
                 "" if not restricao_intervalo_ativa else ("ok" if resultado.atende_intervalo_descargas else "bad"),
             )
         with cards1[2]:
+            bts_card_sub = bt_summary
+            if not resultado.atende_intervalo_descargas and bt_sugerida_card is not None:
+                bts_card_sub = f"Atual: {bt_summary}<br>Sugestão para continuidade: {bt_sugerida_card} BTs"
             _render_result_status_card(
                 "BTs utilizadas",
                 str(total_bt),
-                bt_summary,
+                bts_card_sub,
                 "info",
             )
         with cards1[3]:
@@ -2633,8 +3111,18 @@ def _render_result(
 
         st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
 
+        programacoes_calculadas = [
+            resumo.get("nome_programacao", "-")
+            for resumo in resultado.resumo
+            if resumo.get("nome_programacao")
+        ]
         resumo_apoio_rows = [
             {"Indicador": "Modo de cálculo", "Valor": modo_valor, "Detalhe": modo_sub},
+            {
+                "Indicador": "Programações calculadas",
+                "Valor": str(len(programacoes_calculadas)),
+                "Detalhe": ", ".join(programacoes_calculadas),
+            },
             {
                 "Indicador": "Volume total",
                 "Valor": f"{round_minutes(total_volume, 2)} m³",
@@ -2671,6 +3159,21 @@ def _render_result(
                     "Detalhe": "Horário limite configurado",
                 }
             )
+        if restricao_intervalo_ativa:
+            resumo_apoio_rows.append(
+                {
+                    "Indicador": "Intervalo configurado",
+                    "Valor": intervalo_configurado_text,
+                    "Detalhe": "Limite adotado entre descargas",
+                }
+            )
+            resumo_apoio_rows.append(
+                {
+                    "Indicador": "Maior intervalo atingido",
+                    "Valor": intervalo_atingido_text,
+                    "Detalhe": "Maior intervalo calculado no cenário",
+                }
+            )
         resumo_apoio_rows.append(
             {
                 "Indicador": "Última descarga",
@@ -2686,20 +3189,6 @@ def _render_result(
                     "Detalhe": "Referência visual para continuidade",
                 }
             )
-        st.dataframe(
-            pd.DataFrame(resumo_apoio_rows),
-            hide_index=True,
-            use_container_width=True,
-            height=_dataframe_height_for_rows(
-                len(resumo_apoio_rows),
-                row_height=34,
-                header_height=36,
-                padding=2,
-                min_height=110,
-                max_height=280,
-            ),
-        )
-
         st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
 
         if resultado.recomendacoes_ajuste:
@@ -2792,15 +3281,6 @@ def _render_result(
                                 "Grupo": "Identificação",
                                 "Indicador": "Usina",
                                 "Valor": concretagem.usina if concretagem and concretagem.usina else "-",
-                            },
-                            {
-                                "Grupo": "Identificação",
-                                "Indicador": "Tipo de cimento",
-                                "Valor": (
-                                    concretagem.tipo_cimento
-                                    if concretagem and concretagem.tipo_cimento
-                                    else "-"
-                                ),
                             },
                             {
                                 "Grupo": "Identificação",
@@ -3098,6 +3578,7 @@ def _render_result(
                         st.table(resumo_tabela)
 
         with gantt_tab:
+            st.markdown("<div class='desktop-plotly-planning-marker'></div>", unsafe_allow_html=True)
             figura_interativa = gerar_gantt_interativo(resultado, observed_marker=gantt_observed_marker)
             if figura_interativa is not None:
                 st.plotly_chart(
@@ -3115,8 +3596,12 @@ def _render_result(
                     },
                     key=f"{widget_prefix}_gantt_interativo",
                 )
+            st.markdown("<div class='mobile-static-planning-marker'></div>", unsafe_allow_html=True)
+            figura_estatica = gerar_gantt(resultado, observed_marker=gantt_observed_marker)
+            st.pyplot(figura_estatica, use_container_width=True, clear_figure=True)
             st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
             csv_bytes = exportar_detalhamento_csv(resultado.dataframe_detalhado)
+            st.markdown("<div class='result-export-actions-marker'></div>", unsafe_allow_html=True)
             export_col1, export_col2 = st.columns(2)
             export_col1.download_button(
                 "Baixar CSV do detalhamento",
@@ -3150,6 +3635,7 @@ def _render_result(
             )
 
         with disponibilidade_tab:
+            st.markdown("<div class='desktop-plotly-disponibilidade-marker'></div>", unsafe_allow_html=True)
             figura_disponibilidade_interativa = gerar_disponibilidade_bt_interativa(resultado)
             if figura_disponibilidade_interativa is not None:
                 st.plotly_chart(
@@ -3167,6 +3653,9 @@ def _render_result(
                     },
                     key=f"{widget_prefix}_disponibilidade_interativa",
                 )
+            st.markdown("<div class='mobile-static-disponibilidade-marker'></div>", unsafe_allow_html=True)
+            figura_disponibilidade_estatica = gerar_disponibilidade_bt(resultado)
+            st.pyplot(figura_disponibilidade_estatica, use_container_width=True, clear_figure=True)
             tabela_disponibilidade = gerar_tabela_disponibilidade_bt(resultado)
             st.table(tabela_disponibilidade)
 
@@ -3292,9 +3781,26 @@ def main() -> None:
     ):
         st.session_state.current_scenario_name = "Cenário"
 
-    st.title("Programações Concretagem – NSA")
-    st.caption(
-        "Aplicação para planejamento operacional de concretagens, simulação de ciclos e dimensionamento de betoneiras com verificação de prazo e continuidade."
+    _sync_theme_marker()
+    page_helper_text = (
+        "Aplicação para planejamento operacional de concretagens, simulação de ciclos "
+        "e dimensionamento de betoneiras com verificação de prazo e continuidade."
+    )
+    st.markdown(
+        (
+            "<div class='page-title-block'>"
+            "<div class='page-title-row'>"
+            "<div class='page-title-text'>Programações Concretagem – NSA</div>"
+            "<div class='page-title-help'>"
+            "<details><summary aria-label='Informações desta tela'>?</summary>"
+            f"<div class='body'>{html.escape(page_helper_text)}</div>"
+            "</details>"
+            "</div>"
+            "</div>"
+            f"<div class='page-title-subtitle'>{html.escape(page_helper_text)}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
     )
     st.markdown("<div class='page-separator'></div>", unsafe_allow_html=True)
     if st.session_state.toast_message:
@@ -3446,6 +3952,7 @@ def main() -> None:
                 ),
                 unsafe_allow_html=True,
             )
+            st.markdown("<div class='scenario-actions-marker'></div>", unsafe_allow_html=True)
             topo1, topo2, topo4, topo5 = st.columns([1.65, 1.0, 1.0, 1.0])
             with topo1:
                 _render_active_scenario_box()
@@ -3474,26 +3981,29 @@ def main() -> None:
                 st.rerun()
 
             st.markdown("<div style='height: 0.3rem;'></div>", unsafe_allow_html=True)
-            meta1, meta2, meta3 = st.columns([0.85, 0.85, 1.55])
-            meta1.date_input(
-                "Data do cenário",
-                key="current_scenario_date",
-                format="DD/MM/YYYY",
-            )
-            meta2.selectbox(
-                "Turno",
-                options=TURNO_OPTIONS,
-                key="current_scenario_turno",
-            )
-            meta3.text_input(
-                "Nome do cenário",
-                key="current_scenario_name",
-                placeholder="Digite um nome para o cenário",
-            )
+            st.markdown("<div class='scenario-meta-expander-marker'></div>", unsafe_allow_html=True)
+            with st.expander("Dados do cenário", expanded=True):
+                meta1, meta2, meta3 = st.columns([0.85, 0.85, 1.55])
+                meta1.date_input(
+                    "Data do cenário",
+                    key="current_scenario_date",
+                    format="DD/MM/YYYY",
+                )
+                meta2.selectbox(
+                    "Turno",
+                    options=TURNO_OPTIONS,
+                    key="current_scenario_turno",
+                )
+                meta3.text_input(
+                    "Nome do cenário",
+                    key="current_scenario_name",
+                    placeholder="Digite um nome para o cenário",
+                )
+            _sync_expander_open_state("Dados do cenário", "scenario_meta_expander_open", mobile_default_open=False)
 
         if st.session_state.confirm_delete_scenario:
             target_label = st.session_state.get("delete_target_scenario_label", "").strip() or _current_scenario_label()
-            message = f"Confirma a exclusão do cenário `{target_label}`?"
+            message = f"Confirma a exclusão do cenário **{target_label}**?"
             st.error(message)
             confirm1, confirm2 = st.columns(2)
             if confirm1.button("Confirmar exclusão", use_container_width=True):
@@ -3516,6 +4026,7 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
             payloads = _snapshot_payloads_from_state()
+            st.session_state.scenario_payloads = payloads
             pending_focus = st.session_state.get("pending_focus_program_index")
             if pending_focus is not None:
                 st.query_params["programa"] = str(max(0, min(int(pending_focus), len(payloads) - 1)))
@@ -3523,11 +4034,8 @@ def main() -> None:
             active_index = max(0, min(int(st.session_state.get("active_program_index", 0)), len(payloads) - 1))
 
             tab_labels = [
-                st.session_state.get(
-                    _widget_key(index, "nome_programacao"),
-                    payload.get("elemento_frente") or payload.get("nome_programacao", f"Programação {index}"),
-                )
-                for index, payload in enumerate(st.session_state.scenario_payloads, start=1)
+                _current_program_name(index, payload)
+                for index, payload in enumerate(payloads, start=1)
             ]
 
             toolbar1, toolbar2, toolbar3 = st.columns([1, 1, 1])
@@ -3538,12 +4046,14 @@ def main() -> None:
                 st.rerun()
             toolbar2.empty()
             toolbar3.empty()
+            _render_program_tabs_anchor()
             tabs = st.tabs(tab_labels)
             for index, (tab, payload) in enumerate(
-                zip(tabs, st.session_state.scenario_payloads),
+                zip(tabs, payloads),
                 start=1,
             ):
                 with tab:
+                    st.markdown("<div class='program-actions-marker'></div>", unsafe_allow_html=True)
                     tab_toolbar1, tab_toolbar2, tab_toolbar3, tab_toolbar4 = st.columns([0.8, 0.8, 1.15, 1.15])
                     if tab_toolbar1.button(
                         "Mover à esquerda",
@@ -3686,6 +4196,7 @@ def main() -> None:
             )
 
             if st.session_state.get("resultado") is not None and not calculate_disabled:
+                st.markdown("<div class='calc-actions-marker'></div>", unsafe_allow_html=True)
                 action_calc_col, action_reprog_col = st.columns([1, 1])
                 with action_calc_col:
                     calcular = st.button(

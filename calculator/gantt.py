@@ -205,6 +205,14 @@ def _wrap_section_lines(lines: list[str], width: int = 90) -> str:
     return "\n".join(fill(line, width=width, subsequent_indent="  ") for line in lines if line)
 
 
+def _estimate_gantt_left_margin(labels: list[str]) -> float:
+    if not labels:
+        return 0.08
+    max_chars = max(len(label) for label in labels)
+    estimated = 0.055 + (max_chars * 0.0048)
+    return min(max(0.08, estimated), 0.24)
+
+
 def _draw_section(
     ax,
     title: str,
@@ -803,6 +811,8 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
     for row in range(1, total_rows):
         figura.update_xaxes(showticklabels=False, row=row, col=1)
 
+    footer_line_count = max(1, len(footer_group_lines))
+    bottom_margin = 180 + (footer_line_count * 20)
     figura.update_layout(
         title={
             "text": "Disponibilidade de BT no tempo",
@@ -810,15 +820,15 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
             "xanchor": "left",
             "font": {"size": 20, "color": "#1f2937"},
         },
-        height=max(760, 300 * len(grupos) + 110),
+        height=max(820, 300 * len(grupos) + 150 + (footer_line_count * 18)),
         plot_bgcolor="white",
         paper_bgcolor="white",
         font={"color": "#243041", "size": 12},
-        margin={"l": 72, "r": 40, "t": 86, "b": 154},
+        margin={"l": 72, "r": 40, "t": 86, "b": bottom_margin},
         legend={
             "orientation": "h",
             "x": 0.0,
-            "y": -0.11,
+            "y": -0.09,
             "xanchor": "left",
             "yanchor": "top",
             "bgcolor": "rgba(255,255,255,0.92)",
@@ -836,7 +846,7 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
     if footer_group_lines:
         figura.add_annotation(
             x=0.0,
-            y=-0.215,
+            y=-0.17,
             xref="paper",
             yref="paper",
             text="<b>Frotas consideradas</b>",
@@ -848,7 +858,7 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
         )
         figura.add_annotation(
             x=0.0,
-            y=-0.26,
+            y=-0.225,
             xref="paper",
             yref="paper",
             text="<br>".join(footer_group_lines),
@@ -962,6 +972,35 @@ def gerar_gantt_interativo(
         previous_program = viagem.nome_programacao
 
     df = pd.DataFrame(rows)
+    if df.empty:
+        figura = go.Figure()
+        figura.update_layout(
+            title={
+                "text": "Planejamento Concretagem",
+                "x": 0.0,
+                "xanchor": "left",
+                "y": 0.982,
+                "font": {"size": 20, "color": "#1f2937"},
+            },
+            height=520,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin={"l": 72, "r": 72, "t": 92, "b": 52},
+            font={"color": "#243041", "size": 12},
+            xaxis={"visible": False},
+            yaxis={"visible": False},
+        )
+        figura.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="Sem viagens disponíveis para exibir no planejamento.",
+            showarrow=False,
+            font={"size": 14, "color": "#475569"},
+        )
+        return figura
+
     figura = px.timeline(
         df,
         x_start="Início",
@@ -1131,10 +1170,26 @@ def gerar_gantt_interativo(
         wrapped_footer_columns.append((title, wrapped_body, body_line_count))
 
     footer_line_height = 0.022
-    footer_body_y = 0.028 + (footer_line_height * max(0, max_footer_body_lines - 1))
-    footer_title_y = footer_body_y + 0.03
-    footer_legend_y = footer_title_y + 0.105
-    plot_domain_bottom = min(max(footer_legend_y + 0.07, 0.215), 0.31)
+    footer_bottom_padding = 0.026
+    footer_title_gap = 0.034
+    footer_to_legend_gap = 0.03
+    legend_block_height = 0.07
+    legend_to_xaxis_gap = 0.04
+    xaxis_tick_band = 0.07
+
+    footer_body_y = footer_bottom_padding + (footer_line_height * max(0, max_footer_body_lines - 1))
+    footer_title_y = footer_body_y + footer_title_gap
+    footer_legend_y = footer_title_y + footer_to_legend_gap + legend_block_height
+    footer_reserved_height = (
+        footer_bottom_padding
+        + (footer_line_height * max_footer_body_lines)
+        + footer_title_gap
+        + footer_to_legend_gap
+        + legend_block_height
+        + legend_to_xaxis_gap
+        + xaxis_tick_band
+    )
+    plot_domain_bottom = min(max(footer_reserved_height, 0.32), 0.5)
 
     figura.update_layout(
         title={
@@ -1651,6 +1706,8 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
                 width=52,
             )
 
+    left_margin = _estimate_gantt_left_margin(labels)
     figure.suptitle("Planejamento concretagem", x=0.03, y=0.950, ha="left", fontsize=17, fontweight="bold")
-    figure.subplots_adjust(left=0.08, right=0.985, top=0.92, bottom=0.05)
+    figure.subplots_adjust(left=left_margin, right=0.985, top=0.92, bottom=0.05)
+    figure._preferred_pdf_left = left_margin
     return figure
