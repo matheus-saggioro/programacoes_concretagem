@@ -1114,6 +1114,27 @@ def _render_active_scenario_box() -> None:
     )
 
 
+def _is_mobile_client() -> bool:
+    user_agent = ""
+    try:
+        user_agent = str(st.context.headers.get("user-agent", "") or "")
+    except Exception:
+        user_agent = ""
+    if not user_agent:
+        return False
+    mobile_markers = [
+        "android",
+        "iphone",
+        "ipad",
+        "ipod",
+        "mobile",
+        "opera mini",
+        "iemobile",
+    ]
+    ua = user_agent.lower()
+    return any(marker in ua for marker in mobile_markers)
+
+
 def _render_program_tabs_anchor() -> None:
     st.markdown(
         "<div class='codex-program-tabs-anchor' style='height:0; margin:0; padding:0;'></div>",
@@ -2963,6 +2984,7 @@ def _render_result(
     gantt_observed_marker: dict | None = None,
     expanded: bool = True,
 ) -> None:
+    mobile_client = _is_mobile_client()
     with st.expander(section_title, expanded=expanded):
         st.markdown(
             f"<div class='section-helper'>{helper_text}</div>",
@@ -3578,27 +3600,27 @@ def _render_result(
                         st.table(resumo_tabela)
 
         with gantt_tab:
-            st.markdown("<div class='desktop-plotly-planning-marker'></div>", unsafe_allow_html=True)
-            figura_interativa = gerar_gantt_interativo(resultado, observed_marker=gantt_observed_marker)
-            if figura_interativa is not None:
-                st.plotly_chart(
-                    figura_interativa,
-                    use_container_width=True,
-                    config={
-                        "displaylogo": False,
-                        "toImageButtonOptions": {
-                            "format": "png",
-                            "filename": "gantt_interativo",
-                            "scale": 1,
-                            "width": None,
-                            "height": None,
+            if mobile_client:
+                figura_estatica = gerar_gantt(resultado, observed_marker=gantt_observed_marker)
+                st.pyplot(figura_estatica, use_container_width=True, clear_figure=True)
+            else:
+                figura_interativa = gerar_gantt_interativo(resultado, observed_marker=gantt_observed_marker)
+                if figura_interativa is not None:
+                    st.plotly_chart(
+                        figura_interativa,
+                        use_container_width=True,
+                        config={
+                            "displaylogo": False,
+                            "toImageButtonOptions": {
+                                "format": "png",
+                                "filename": "gantt_interativo",
+                                "scale": 1,
+                                "width": None,
+                                "height": None,
+                            },
                         },
-                    },
-                    key=f"{widget_prefix}_gantt_interativo",
-                )
-            st.markdown("<div class='mobile-static-planning-marker'></div>", unsafe_allow_html=True)
-            figura_estatica = gerar_gantt(resultado, observed_marker=gantt_observed_marker)
-            st.pyplot(figura_estatica, use_container_width=True, clear_figure=True)
+                        key=f"{widget_prefix}_gantt_interativo",
+                    )
             st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
             csv_bytes = exportar_detalhamento_csv(resultado.dataframe_detalhado)
             st.markdown("<div class='result-export-actions-marker'></div>", unsafe_allow_html=True)
@@ -3635,27 +3657,27 @@ def _render_result(
             )
 
         with disponibilidade_tab:
-            st.markdown("<div class='desktop-plotly-disponibilidade-marker'></div>", unsafe_allow_html=True)
-            figura_disponibilidade_interativa = gerar_disponibilidade_bt_interativa(resultado)
-            if figura_disponibilidade_interativa is not None:
-                st.plotly_chart(
-                    figura_disponibilidade_interativa,
-                    use_container_width=True,
-                    config={
-                        "displaylogo": False,
-                        "toImageButtonOptions": {
-                            "format": "png",
-                            "filename": "disponibilidade_bt_interativa",
-                            "scale": 1,
-                            "width": None,
-                            "height": None,
+            if mobile_client:
+                figura_disponibilidade_estatica = gerar_disponibilidade_bt(resultado)
+                st.pyplot(figura_disponibilidade_estatica, use_container_width=True, clear_figure=True)
+            else:
+                figura_disponibilidade_interativa = gerar_disponibilidade_bt_interativa(resultado)
+                if figura_disponibilidade_interativa is not None:
+                    st.plotly_chart(
+                        figura_disponibilidade_interativa,
+                        use_container_width=True,
+                        config={
+                            "displaylogo": False,
+                            "toImageButtonOptions": {
+                                "format": "png",
+                                "filename": "disponibilidade_bt_interativa",
+                                "scale": 1,
+                                "width": None,
+                                "height": None,
+                            },
                         },
-                    },
-                    key=f"{widget_prefix}_disponibilidade_interativa",
-                )
-            st.markdown("<div class='mobile-static-disponibilidade-marker'></div>", unsafe_allow_html=True)
-            figura_disponibilidade_estatica = gerar_disponibilidade_bt(resultado)
-            st.pyplot(figura_disponibilidade_estatica, use_container_width=True, clear_figure=True)
+                        key=f"{widget_prefix}_disponibilidade_interativa",
+                    )
             tabela_disponibilidade = gerar_tabela_disponibilidade_bt(resultado)
             st.table(tabela_disponibilidade)
 
