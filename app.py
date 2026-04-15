@@ -779,7 +779,7 @@ def _inject_styles() -> None:
                 margin-top: 0.45rem;
             }
             .result-status-card {
-                margin-bottom: 0.55rem;
+                margin-bottom: 0.06rem;
                 padding: 0.68rem 0.75rem;
             }
             .result-row-gap {
