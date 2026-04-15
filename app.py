@@ -709,16 +709,14 @@ def _inject_styles() -> None:
             }
             .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"],
             .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"],
-            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"],
-            .element-container:has(.result-cards-row-two-marker) + div[data-testid="stHorizontalBlock"] {
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] {
                 gap: 0.45rem !important;
                 row-gap: 0.45rem !important;
                 flex-wrap: wrap !important;
             }
             .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
             .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-            .element-container:has(.result-cards-row-two-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                 width: calc(50% - 0.25rem) !important;
                 min-width: calc(50% - 0.25rem) !important;
                 flex: 1 1 calc(50% - 0.25rem) !important;
@@ -3173,11 +3171,7 @@ def _render_result(
         if cards1 is not None:
             card_targets = cards1
         else:
-            st.markdown("<div class='result-cards-row-two-marker'></div>", unsafe_allow_html=True)
-            cards_row1 = st.columns(2)
-            st.markdown("<div class='result-cards-row-two-marker'></div>", unsafe_allow_html=True)
-            cards_row2 = st.columns(2)
-            card_targets = [cards_row1[0], cards_row1[1], cards_row2[0], cards_row2[1], st.container()]
+            card_targets = [st.container() for _ in range(5)]
         with card_targets[0]:
             _render_result_status_card(
                 "Prazo de descarga",
