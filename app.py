@@ -172,6 +172,7 @@ def _inject_styles() -> None:
             align-items: center;
             font-size: 0.96rem;
             font-weight: 700;
+            margin-bottom: 0.15rem;
         }
         .scenario-meta-preview {
             padding: 0.15rem 0 0.55rem 0;
@@ -216,12 +217,16 @@ def _inject_styles() -> None:
         .result-status-card {
             --card-border: color-mix(in srgb, var(--text-color, #ffffff) 12%, transparent);
             --card-accent: rgba(255, 255, 255, 0.18);
+            --card-bg: var(--result-surface-bg, #1e2633);
+            --card-label: #b8c6d9;
+            --card-title: #f8fafc;
+            --card-text: #d7e0eb;
             border: 1px solid var(--card-border);
             border-left: 4px solid var(--card-accent);
             border-radius: 12px;
             padding: 0.8rem 0.9rem;
             height: 178px;
-            background: var(--result-surface-bg, #1e2633);
+            background: var(--card-bg);
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
             display: flex;
             flex-direction: column;
@@ -231,8 +236,8 @@ def _inject_styles() -> None:
             font-size: 0.78rem;
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            color: var(--result-surface-label, var(--text-color, #ffffff));
-            opacity: 0.82;
+            color: var(--card-label);
+            opacity: 0.92;
             margin-bottom: 0.3rem;
         }
         .result-status-card .value {
@@ -240,12 +245,12 @@ def _inject_styles() -> None:
             font-weight: 700;
             line-height: 1.15;
             margin-bottom: 0.2rem;
-            color: var(--result-surface-title, var(--text-color, #ffffff));
+            color: var(--card-title);
         }
         .result-status-card .subvalue {
             font-size: 0.88rem;
-            color: var(--result-surface-text, var(--text-color, #ffffff));
-            opacity: 0.88;
+            color: var(--card-text);
+            opacity: 0.98;
             margin-top: auto;
             overflow: hidden;
             display: -webkit-box;
@@ -254,20 +259,24 @@ def _inject_styles() -> None:
             line-clamp: 4;
         }
         .result-status-card.ok {
-            --card-border: rgba(76, 175, 80, 0.34);
-            --card-accent: rgba(76, 175, 80, 0.88);
+            --card-border: rgba(103, 203, 114, 0.34);
+            --card-accent: rgba(103, 203, 114, 0.92);
+            --card-bg: #314637;
         }
         .result-status-card.warn {
-            --card-border: rgba(255, 167, 38, 0.34);
-            --card-accent: rgba(255, 167, 38, 0.88);
+            --card-border: rgba(85, 131, 235, 0.34);
+            --card-accent: rgba(85, 131, 235, 0.92);
+            --card-bg: #2b3650;
         }
         .result-status-card.bad {
-            --card-border: rgba(239, 83, 80, 0.34);
-            --card-accent: rgba(239, 83, 80, 0.88);
+            --card-border: rgba(242, 112, 118, 0.34);
+            --card-accent: rgba(242, 112, 118, 0.92);
+            --card-bg: #4a2f35;
         }
         .result-status-card.info {
-            --card-border: rgba(37, 99, 235, 0.34);
-            --card-accent: rgba(37, 99, 235, 0.92);
+            --card-border: rgba(93, 147, 255, 0.34);
+            --card-accent: rgba(93, 147, 255, 0.92);
+            --card-bg: #2d3b57;
         }
         .result-kicker {
             font-size: 0.84rem;
@@ -462,56 +471,126 @@ def _inject_styles() -> None:
         html[data-codex-theme="light"] .result-inline-note,
         html[data-codex-theme="light"] .result-linked-note,
         html[data-codex-theme="light"] .result-mini-card {
-            background: var(--secondary-background-color, #eef2f7);
+            background: var(--result-surface-bg, var(--secondary-background-color, #eef2f7));
             box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
         }
-        .stApp[data-codex-theme="light"] .result-status-card .label,
-        .stApp[data-codex-theme="light"] .result-kicker,
-        .stApp[data-codex-theme="light"] .result-box .subtitle,
-        .stApp[data-codex-theme="light"] .result-mini-card .label,
-        body[data-codex-theme="light"] .result-status-card .label,
-        body[data-codex-theme="light"] .result-kicker,
-        body[data-codex-theme="light"] .result-box .subtitle,
-        body[data-codex-theme="light"] .result-mini-card .label,
-        html[data-codex-theme="light"] .result-status-card .label,
-        html[data-codex-theme="light"] .result-kicker,
-        html[data-codex-theme="light"] .result-box .subtitle,
-        html[data-codex-theme="light"] .result-mini-card .label {
-            color: #5f6b7a;
+        .stApp[data-codex-theme="light"] .result-status-card.ok,
+        body[data-codex-theme="light"] .result-status-card.ok,
+        html[data-codex-theme="light"] .result-status-card.ok {
+            --card-bg: #f2fbf4;
+            --card-label: #5f6b7a;
+            --card-title: #0f172a;
+            --card-text: #475569;
         }
-        .stApp[data-codex-theme="light"] .result-status-card .value,
-        .stApp[data-codex-theme="light"] .result-box .title,
-        .stApp[data-codex-theme="light"] .result-inline-note .title,
-        .stApp[data-codex-theme="light"] .result-linked-note .title,
-        .stApp[data-codex-theme="light"] .result-mini-card .value,
-        body[data-codex-theme="light"] .result-status-card .value,
-        body[data-codex-theme="light"] .result-box .title,
-        body[data-codex-theme="light"] .result-inline-note .title,
-        body[data-codex-theme="light"] .result-linked-note .title,
-        body[data-codex-theme="light"] .result-mini-card .value,
-        html[data-codex-theme="light"] .result-status-card .value,
-        html[data-codex-theme="light"] .result-box .title,
-        html[data-codex-theme="light"] .result-inline-note .title,
-        html[data-codex-theme="light"] .result-linked-note .title,
-        html[data-codex-theme="light"] .result-mini-card .value {
-            color: #0f172a;
+        .stApp[data-codex-theme="light"] .result-status-card.bad,
+        body[data-codex-theme="light"] .result-status-card.bad,
+        html[data-codex-theme="light"] .result-status-card.bad {
+            --card-bg: #fdf2f3;
+            --card-label: #5f6b7a;
+            --card-title: #0f172a;
+            --card-text: #475569;
         }
-        .stApp[data-codex-theme="light"] .result-status-card .subvalue,
-        .stApp[data-codex-theme="light"] .result-box,
-        .stApp[data-codex-theme="light"] .result-inline-note .body,
-        .stApp[data-codex-theme="light"] .result-linked-note .body,
-        .stApp[data-codex-theme="light"] .result-mini-card .subvalue,
-        body[data-codex-theme="light"] .result-status-card .subvalue,
-        body[data-codex-theme="light"] .result-box,
-        body[data-codex-theme="light"] .result-inline-note .body,
-        body[data-codex-theme="light"] .result-linked-note .body,
-        body[data-codex-theme="light"] .result-mini-card .subvalue,
-        html[data-codex-theme="light"] .result-status-card .subvalue,
-        html[data-codex-theme="light"] .result-box,
-        html[data-codex-theme="light"] .result-inline-note .body,
-        html[data-codex-theme="light"] .result-linked-note .body,
-        html[data-codex-theme="light"] .result-mini-card .subvalue {
-            color: #475569;
+        .stApp[data-codex-theme="light"] .result-status-card.info,
+        body[data-codex-theme="light"] .result-status-card.info,
+        html[data-codex-theme="light"] .result-status-card.info {
+            --card-bg: #f1f6ff;
+            --card-label: #5f6b7a;
+            --card-title: #0f172a;
+            --card-text: #475569;
+        }
+        .stApp[data-codex-theme="light"] .result-status-card.warn,
+        body[data-codex-theme="light"] .result-status-card.warn,
+        html[data-codex-theme="light"] .result-status-card.warn {
+            --card-bg: #f1f6ff;
+            --card-label: #5f6b7a;
+            --card-title: #0f172a;
+            --card-text: #475569;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card,
+        .stApp[data-codex-theme="dark"] .result-box,
+        .stApp[data-codex-theme="dark"] .result-inline-note,
+        .stApp[data-codex-theme="dark"] .result-linked-note,
+        .stApp[data-codex-theme="dark"] .result-mini-card,
+        body[data-codex-theme="dark"] .result-status-card,
+        body[data-codex-theme="dark"] .result-box,
+        body[data-codex-theme="dark"] .result-inline-note,
+        body[data-codex-theme="dark"] .result-linked-note,
+        body[data-codex-theme="dark"] .result-mini-card,
+        html[data-codex-theme="dark"] .result-status-card,
+        html[data-codex-theme="dark"] .result-box,
+        html[data-codex-theme="dark"] .result-inline-note,
+        html[data-codex-theme="dark"] .result-linked-note,
+        html[data-codex-theme="dark"] .result-mini-card {
+            background: #2a3344;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card.ok,
+        body[data-codex-theme="dark"] .result-status-card.ok,
+        html[data-codex-theme="dark"] .result-status-card.ok {
+            background: #314637;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card.bad,
+        body[data-codex-theme="dark"] .result-status-card.bad,
+        html[data-codex-theme="dark"] .result-status-card.bad {
+            background: #4a2f35;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card.info,
+        body[data-codex-theme="dark"] .result-status-card.info,
+        html[data-codex-theme="dark"] .result-status-card.info {
+            background: #2d3b57;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card.warn,
+        body[data-codex-theme="dark"] .result-status-card.warn,
+        html[data-codex-theme="dark"] .result-status-card.warn {
+            background: #2b3650;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card .label,
+        .stApp[data-codex-theme="dark"] .result-kicker,
+        .stApp[data-codex-theme="dark"] .result-box .subtitle,
+        .stApp[data-codex-theme="dark"] .result-mini-card .label,
+        body[data-codex-theme="dark"] .result-status-card .label,
+        body[data-codex-theme="dark"] .result-kicker,
+        body[data-codex-theme="dark"] .result-box .subtitle,
+        body[data-codex-theme="dark"] .result-mini-card .label,
+        html[data-codex-theme="dark"] .result-status-card .label,
+        html[data-codex-theme="dark"] .result-kicker,
+        html[data-codex-theme="dark"] .result-box .subtitle,
+        html[data-codex-theme="dark"] .result-mini-card .label {
+            color: #9fb0c5;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card .value,
+        .stApp[data-codex-theme="dark"] .result-box .title,
+        .stApp[data-codex-theme="dark"] .result-inline-note .title,
+        .stApp[data-codex-theme="dark"] .result-linked-note .title,
+        .stApp[data-codex-theme="dark"] .result-mini-card .value,
+        body[data-codex-theme="dark"] .result-status-card .value,
+        body[data-codex-theme="dark"] .result-box .title,
+        body[data-codex-theme="dark"] .result-inline-note .title,
+        body[data-codex-theme="dark"] .result-linked-note .title,
+        body[data-codex-theme="dark"] .result-mini-card .value,
+        html[data-codex-theme="dark"] .result-status-card .value,
+        html[data-codex-theme="dark"] .result-box .title,
+        html[data-codex-theme="dark"] .result-inline-note .title,
+        html[data-codex-theme="dark"] .result-linked-note .title,
+        html[data-codex-theme="dark"] .result-mini-card .value {
+            color: #f8fafc;
+        }
+        .stApp[data-codex-theme="dark"] .result-status-card .subvalue,
+        .stApp[data-codex-theme="dark"] .result-box,
+        .stApp[data-codex-theme="dark"] .result-inline-note .body,
+        .stApp[data-codex-theme="dark"] .result-linked-note .body,
+        .stApp[data-codex-theme="dark"] .result-mini-card .subvalue,
+        body[data-codex-theme="dark"] .result-status-card .subvalue,
+        body[data-codex-theme="dark"] .result-box,
+        body[data-codex-theme="dark"] .result-inline-note .body,
+        body[data-codex-theme="dark"] .result-linked-note .body,
+        body[data-codex-theme="dark"] .result-mini-card .subvalue,
+        html[data-codex-theme="dark"] .result-status-card .subvalue,
+        html[data-codex-theme="dark"] .result-box,
+        html[data-codex-theme="dark"] .result-inline-note .body,
+        html[data-codex-theme="dark"] .result-linked-note .body,
+        html[data-codex-theme="dark"] .result-mini-card .subvalue {
+            color: #d4dde8;
         }
         @media (max-width: 768px) {
             .mobile-hidden,
@@ -551,6 +630,9 @@ def _inject_styles() -> None:
                 flex-wrap: wrap;
                 font-size: 0.92rem;
                 padding: 0.45rem 0.75rem;
+            }
+            .element-container:has(.active-scenario-box-marker) + .element-container {
+                margin-bottom: 0.7rem !important;
             }
             .section-helper,
             .scenario-meta-preview,
@@ -595,28 +677,27 @@ def _inject_styles() -> None:
             div[data-testid="stButton"] button {
                 width: 100%;
             }
-            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] {
+            .element-container:has(.scenario-actions-row-two-marker) + div[data-testid="stHorizontalBlock"] {
                 gap: 0.45rem !important;
                 row-gap: 0.45rem !important;
                 flex-wrap: wrap !important;
             }
-            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child {
-                width: 100% !important;
-                min-width: 100% !important;
-                flex: 1 1 100% !important;
-            }
-            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:not(:first-child) {
+            .element-container:has(.scenario-actions-row-two-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                 width: calc(50% - 0.25rem) !important;
                 min-width: calc(50% - 0.25rem) !important;
                 flex: 1 1 calc(50% - 0.25rem) !important;
             }
-            .element-container:has(.scenario-actions-marker) + div[data-testid="stHorizontalBlock"] button {
+            .element-container:has(.scenario-actions-row-two-marker) + div[data-testid="stHorizontalBlock"] button,
+            .element-container:has(.scenario-actions-row-single-marker) + div[data-testid="stHorizontalBlock"] button {
                 font-size: 0.83rem !important;
                 min-height: 2.45rem;
                 padding-left: 0.35rem !important;
                 padding-right: 0.35rem !important;
                 white-space: normal !important;
                 line-height: 1.12 !important;
+            }
+            .element-container:has(.scenario-actions-row-single-marker) + div[data-testid="stHorizontalBlock"] {
+                gap: 0.45rem !important;
             }
             .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"],
             .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"],
@@ -670,31 +751,47 @@ def _inject_styles() -> None:
             .result-box,
             .result-inline-note,
             .result-linked-note {
-                padding: 0.7rem 0.8rem;
+                padding: 0.62rem 0.72rem;
             }
             .result-status-card,
             .result-mini-card {
-                height: 162px;
+                height: auto;
+                min-height: 102px;
             }
             .result-status-card .value {
-                font-size: 1.15rem;
+                font-size: 0.98rem;
             }
             .result-status-card .subvalue,
             .result-mini-card .subvalue,
             .result-linked-note .body {
-                font-size: 0.82rem;
+                font-size: 0.78rem;
             }
             .result-status-card .label,
             .result-mini-card .label {
-                font-size: 0.74rem;
+                font-size: 0.71rem;
             }
             .result-mini-card .value {
-                font-size: 1.02rem;
+                font-size: 0.96rem;
             }
             .result-linked-note,
             .result-inline-note,
             .result-box {
                 margin-top: 0.45rem;
+            }
+            .result-status-card {
+                margin-bottom: 0.55rem;
+                padding: 0.68rem 0.75rem;
+            }
+            .result-row-gap {
+                height: 0.5rem;
+            }
+            .result-status-card .subvalue {
+                margin-top: 0.32rem !important;
+                display: -webkit-box;
+                -webkit-box-orient: vertical;
+                -webkit-line-clamp: 3;
+                line-clamp: 3;
+                overflow: hidden;
             }
             div[data-testid="stDataFrame"] {
                 overflow-x: auto;
@@ -822,18 +919,20 @@ def _sync_theme_marker() -> None:
             parentStyles.getPropertyValue('--secondary-background-color'),
             window.parent.getComputedStyle(body).backgroundColor,
           ];
-          const textValue = textCandidates.find((value) => parseColor(value));
-          const textRgb = parseColor(textValue);
           const colorValue = colorCandidates.find((value) => parseColor(value));
           const rgb = parseColor(colorValue);
+          const textValue = textCandidates.find((value) => parseColor(value));
+          const textRgb = parseColor(textValue);
           if (!textRgb && !rgb) return;
-          const theme = textRgb
-            ? luminance(textRgb) < 0.45
+          const theme = rgb
+            ? luminance(rgb) > 0.45
               ? 'light'
               : 'dark'
-            : luminance(rgb) > 0.45
-              ? 'light'
-              : 'dark';
+            : textRgb
+              ? luminance(textRgb) < 0.45
+                ? 'light'
+                : 'dark'
+              : 'light';
           body.setAttribute('data-codex-theme', theme);
           root.setAttribute('data-codex-theme', theme);
           localBody.setAttribute('data-codex-theme', theme);
@@ -3054,14 +3153,15 @@ def _render_result(
             observed_marker=gantt_observed_marker,
         )
 
-        cards1 = st.columns(5)
+        cards1 = st.columns(5) if not mobile_client else None
         modo_valor = "Automático" if resultado.automatico else "Fixo"
         modo_sub = (
             "Menor frota encontrada"
             if resultado.automatico and resultado.dimensionamento_encontrado
             else bt_summary
         )
-        with cards1[0]:
+        card_targets = cards1 if cards1 is not None else [st.container() for _ in range(5)]
+        with card_targets[0]:
             _render_result_status_card(
                 "Prazo de descarga",
                 (
@@ -3078,7 +3178,7 @@ def _render_result(
                 ),
                 "info" if not prazo_configurado else ("ok" if resultado.prazo_atendido else "bad"),
             )
-        with cards1[1]:
+        with card_targets[1]:
             continuidade_value = (
                 "Atende"
                 if resultado.atende_intervalo_descargas
@@ -3098,7 +3198,7 @@ def _render_result(
                 continuidade_sub,
                 "" if not restricao_intervalo_ativa else ("ok" if resultado.atende_intervalo_descargas else "bad"),
             )
-        with cards1[2]:
+        with card_targets[2]:
             bts_card_sub = bt_summary
             if not resultado.atende_intervalo_descargas and bt_sugerida_card is not None:
                 bts_card_sub = f"Atual: {bt_summary}<br>Sugestão para continuidade: {bt_sugerida_card} BTs"
@@ -3108,7 +3208,7 @@ def _render_result(
                 bts_card_sub,
                 "info",
             )
-        with cards1[3]:
+        with card_targets[3]:
             _render_result_status_card(
                 "Gargalo por espera",
                 (
@@ -3121,14 +3221,14 @@ def _render_result(
                     if resultado.gargalo_por_espera == "sem espera"
                     else "Recurso com maior espera acumulada"
                 ),
-                "warn",
+                "info" if resultado.gargalo_por_espera == "sem espera" else "bad",
             )
-        with cards1[4]:
+        with card_targets[4]:
             _render_result_status_card(
                 "Recurso mais ocupado",
                 _preserve_label_case(resultado.recurso_mais_ocupado),
                 "Maior taxa de ocupação relativa",
-                "warn",
+                "info",
             )
 
         st.markdown("<div class='result-row-gap'></div>", unsafe_allow_html=True)
@@ -3761,6 +3861,7 @@ def main() -> None:
         st.session_state.confirm_delete_scenario = False
     if "delete_target_scenario_id" not in st.session_state:
         st.session_state.delete_target_scenario_id = ""
+    mobile_client = _is_mobile_client()
     if "delete_target_scenario_label" not in st.session_state:
         st.session_state.delete_target_scenario_label = ""
     if "delete_target_previous_scenario_id" not in st.session_state:
@@ -3974,33 +4075,64 @@ def main() -> None:
                 ),
                 unsafe_allow_html=True,
             )
-            st.markdown("<div class='scenario-actions-marker'></div>", unsafe_allow_html=True)
-            topo1, topo2, topo4, topo5 = st.columns([1.65, 1.0, 1.0, 1.0])
-            with topo1:
+            if mobile_client:
+                st.markdown("<div class='active-scenario-box-marker'></div>", unsafe_allow_html=True)
                 _render_active_scenario_box()
-            topo2.download_button(
-                "Exportar programação CSV",
-                data=scenario_export_bytes,
-                file_name=scenario_export_filename,
-                mime="text/csv",
-                use_container_width=True,
-                disabled=scenario_export_record is None,
-            )
-            if scenario_export_error:
-                topo2.caption("Preencha o nome do cenário para exportar.")
-            if topo4.button("Excluir cenário", use_container_width=True):
-                try:
-                    current_record = _build_current_scenario_record()
-                    st.session_state.pending_delete_preview_record = {
-                        "record": current_record,
-                        "previous_id": st.session_state.get("current_scenario_id", "").strip(),
-                    }
+                st.markdown("<div class='scenario-actions-row-two-marker'></div>", unsafe_allow_html=True)
+                mobile_actions_row1 = st.columns(2)
+                mobile_actions_row1[0].download_button(
+                    "Exportar CSV",
+                    data=scenario_export_bytes,
+                    file_name=scenario_export_filename,
+                    mime="text/csv",
+                    use_container_width=True,
+                    disabled=scenario_export_record is None,
+                )
+                if mobile_actions_row1[1].button("Excluir", use_container_width=True):
+                    try:
+                        current_record = _build_current_scenario_record()
+                        st.session_state.pending_delete_preview_record = {
+                            "record": current_record,
+                            "previous_id": st.session_state.get("current_scenario_id", "").strip(),
+                        }
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+                st.markdown("<div class='scenario-actions-row-single-marker'></div>", unsafe_allow_html=True)
+                mobile_actions_row2 = st.columns(1)
+                if mobile_actions_row2[0].button("Voltar", use_container_width=True):
+                    _go_to_page("cenario")
                     st.rerun()
-                except Exception as exc:
-                    st.error(str(exc))
-            if topo5.button("Voltar para cenários", use_container_width=True):
-                _go_to_page("cenario")
-                st.rerun()
+                if scenario_export_error:
+                    st.caption("Preencha o nome do cenário para exportar.")
+            else:
+                st.markdown("<div class='scenario-actions-marker'></div>", unsafe_allow_html=True)
+                topo1, topo2, topo4, topo5 = st.columns([1.65, 1.0, 1.0, 1.0])
+                with topo1:
+                    _render_active_scenario_box()
+                topo2.download_button(
+                    "Exportar programação CSV",
+                    data=scenario_export_bytes,
+                    file_name=scenario_export_filename,
+                    mime="text/csv",
+                    use_container_width=True,
+                    disabled=scenario_export_record is None,
+                )
+                if scenario_export_error:
+                    topo2.caption("Preencha o nome do cenário para exportar.")
+                if topo4.button("Excluir cenário", use_container_width=True):
+                    try:
+                        current_record = _build_current_scenario_record()
+                        st.session_state.pending_delete_preview_record = {
+                            "record": current_record,
+                            "previous_id": st.session_state.get("current_scenario_id", "").strip(),
+                        }
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(str(exc))
+                if topo5.button("Voltar para cenários", use_container_width=True):
+                    _go_to_page("cenario")
+                    st.rerun()
 
             st.markdown("<div style='height: 0.3rem;'></div>", unsafe_allow_html=True)
             st.markdown("<div class='scenario-meta-expander-marker'></div>", unsafe_allow_html=True)
