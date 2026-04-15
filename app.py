@@ -628,11 +628,19 @@ def _inject_styles() -> None:
                 line-height: 1.3;
                 align-items: flex-start;
                 flex-wrap: wrap;
-                font-size: 0.92rem;
-                padding: 0.45rem 0.75rem;
+                font-size: 0.84rem;
+                padding: 0.38rem 0.65rem;
+                border-radius: 10px;
+            }
+            .active-scenario-box > span {
+                display: block;
+                width: 100%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             .element-container:has(.active-scenario-box-marker) + .element-container {
-                margin-bottom: 0.7rem !important;
+                margin-bottom: 0.45rem !important;
             }
             .section-helper,
             .scenario-meta-preview,
@@ -689,8 +697,8 @@ def _inject_styles() -> None:
             }
             .element-container:has(.scenario-actions-row-two-marker) + div[data-testid="stHorizontalBlock"] button,
             .element-container:has(.scenario-actions-row-single-marker) + div[data-testid="stHorizontalBlock"] button {
-                font-size: 0.83rem !important;
-                min-height: 2.45rem;
+                font-size: 0.78rem !important;
+                min-height: 2.15rem;
                 padding-left: 0.35rem !important;
                 padding-right: 0.35rem !important;
                 white-space: normal !important;
@@ -701,14 +709,16 @@ def _inject_styles() -> None:
             }
             .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"],
             .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"],
-            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] {
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"],
+            .element-container:has(.result-cards-row-two-marker) + div[data-testid="stHorizontalBlock"] {
                 gap: 0.45rem !important;
                 row-gap: 0.45rem !important;
                 flex-wrap: wrap !important;
             }
             .element-container:has(.program-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
             .element-container:has(.calc-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            .element-container:has(.result-export-actions-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+            .element-container:has(.result-cards-row-two-marker) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
                 width: calc(50% - 0.25rem) !important;
                 min-width: calc(50% - 0.25rem) !important;
                 flex: 1 1 calc(50% - 0.25rem) !important;
@@ -756,22 +766,22 @@ def _inject_styles() -> None:
             .result-status-card,
             .result-mini-card {
                 height: auto;
-                min-height: 102px;
+                min-height: 94px;
             }
             .result-status-card .value {
-                font-size: 0.98rem;
+                font-size: 0.92rem;
             }
             .result-status-card .subvalue,
             .result-mini-card .subvalue,
             .result-linked-note .body {
-                font-size: 0.78rem;
+                font-size: 0.75rem;
             }
             .result-status-card .label,
             .result-mini-card .label {
-                font-size: 0.71rem;
+                font-size: 0.68rem;
             }
             .result-mini-card .value {
-                font-size: 0.96rem;
+                font-size: 0.9rem;
             }
             .result-linked-note,
             .result-inline-note,
@@ -780,17 +790,17 @@ def _inject_styles() -> None:
             }
             .result-status-card {
                 margin-bottom: 0.06rem;
-                padding: 0.68rem 0.75rem;
+                padding: 0.58rem 0.62rem;
             }
             .result-row-gap {
-                height: 0.5rem;
+                height: 0.35rem;
             }
             .result-status-card .subvalue {
-                margin-top: 0.32rem !important;
+                margin-top: 0.26rem !important;
                 display: -webkit-box;
                 -webkit-box-orient: vertical;
-                -webkit-line-clamp: 3;
-                line-clamp: 3;
+                -webkit-line-clamp: 2;
+                line-clamp: 2;
                 overflow: hidden;
             }
             div[data-testid="stDataFrame"] {
@@ -3160,7 +3170,14 @@ def _render_result(
             if resultado.automatico and resultado.dimensionamento_encontrado
             else bt_summary
         )
-        card_targets = cards1 if cards1 is not None else [st.container() for _ in range(5)]
+        if cards1 is not None:
+            card_targets = cards1
+        else:
+            st.markdown("<div class='result-cards-row-two-marker'></div>", unsafe_allow_html=True)
+            cards_row1 = st.columns(2)
+            st.markdown("<div class='result-cards-row-two-marker'></div>", unsafe_allow_html=True)
+            cards_row2 = st.columns(2)
+            card_targets = [cards_row1[0], cards_row1[1], cards_row2[0], cards_row2[1], st.container()]
         with card_targets[0]:
             _render_result_status_card(
                 "Prazo de descarga",
@@ -4081,7 +4098,7 @@ def main() -> None:
                 st.markdown("<div class='scenario-actions-row-two-marker'></div>", unsafe_allow_html=True)
                 mobile_actions_row1 = st.columns(2)
                 mobile_actions_row1[0].download_button(
-                    "Exportar CSV",
+                    "Exportar",
                     data=scenario_export_bytes,
                     file_name=scenario_export_filename,
                     mime="text/csv",
