@@ -5,7 +5,6 @@ from copy import deepcopy
 import os
 import tempfile
 from pathlib import Path
-from textwrap import fill
 from datetime import timedelta
 
 MPL_CONFIG_DIR = Path(tempfile.gettempdir()) / "serra_araras_mplconfig"
@@ -43,89 +42,8 @@ def _ensure_plotly_browser_path() -> None:
             return
 
 
-def _priority_sort_value(prioridade: int) -> int:
-    return prioridade if prioridade > 0 else 999
-
-
 def _priority_suffix(prioridade: int) -> str:
     return f" | P{prioridade}" if prioridade > 0 else ""
-
-
-def _sequencing_lines(resultado: ResultadoCalculo) -> list[str]:
-    if not resultado.sequenciamento_prioridade_ativo:
-        return []
-
-    labels_by_group = resultado.bt_group_labels
-    grouped = {}
-    for concretagem in resultado.concretagens:
-        grouped.setdefault(concretagem.grupo_bt, []).append(concretagem)
-
-    lines: list[str] = []
-    for group_key, members in grouped.items():
-        if len(members) <= 1:
-            continue
-        ordered = sorted(
-            members,
-            key=lambda item: (
-                item.inicio_datetime(resultado.data_base),
-                _priority_sort_value(item.prioridade),
-                item.ordem,
-            ),
-        )
-        sequence = " -> ".join(
-            f"{item.nome_programacao} ({format_clock(item.inicio_datetime(resultado.data_base), resultado.data_base)}{_priority_suffix(item.prioridade)})"
-            for item in ordered
-        )
-        lines.append(f"{labels_by_group.get(group_key, group_key)}: {sequence}")
-    return lines
-
-
-def _intervalo_descargas_lines(resultado: ResultadoCalculo) -> list[str]:
-    linhas: list[str] = []
-    for intervalo in resultado.intervalos_descarga:
-        if not intervalo.get("violacao"):
-            continue
-        linhas.append(
-            (
-                f"{intervalo['frente_label']}: "
-                f"{round_minutes(intervalo['intervalo_min'], 1)} min "
-                f"(limite {round_minutes(intervalo['limite_min'], 1)} min) entre "
-                f"{format_clock(intervalo['fim_descarga_anterior'], resultado.data_base)} e "
-                f"{format_clock(intervalo['inicio_proxima_descarga'], resultado.data_base)}"
-            )
-        )
-    return linhas
-
-
-def gerar_contexto_gantt(resultado: ResultadoCalculo) -> dict[str, list]:
-    cycle_blocks: list[tuple[str, str]] = []
-    for concretagem in resultado.concretagens:
-        etapas = " | ".join(
-            f"{_etapa_sigla(etapa)} {round_minutes(duracao, 1)} min"
-            for etapa, duracao in concretagem.ciclo.as_rows()
-        )
-        cycle_blocks.append((concretagem.nome_programacao, etapas))
-
-    return {
-        "cycle_blocks": cycle_blocks,
-        "intervalos_lines": _intervalo_descargas_lines(resultado),
-        "sequencing_lines": _sequencing_lines(resultado),
-    }
-
-
-def _build_interactive_context_columns(resultado: ResultadoCalculo) -> list[tuple[str, list[str]]]:
-    context = gerar_contexto_gantt(resultado)
-    cycle_lines = [f"{program_name}: {etapas}" for program_name, etapas in context["cycle_blocks"]]
-    columns: list[tuple[str, list[str]]] = [("Tempos de ciclo", cycle_lines)]
-    if context["intervalos_lines"]:
-        columns.append(("Continuidade operacional", context["intervalos_lines"]))
-    if context["sequencing_lines"]:
-        columns.append(("Sequenciamento adotado", context["sequencing_lines"]))
-    return columns
-
-
-def _wrap_plotly_context_lines(lines: list[str], width: int) -> str:
-    return "<br>".join(fill(line, width=width) for line in lines if line)
 
 
 def _etapa_sigla(nome_etapa: str) -> str:
@@ -494,28 +412,18 @@ def gerar_disponibilidade_bt(resultado: ResultadoCalculo) -> plt.Figure:
 
     for ax in axes[:-1]:
         ax.tick_params(axis="x", labelbottom=False)
-    axes[-1].set_xlabel("Tempo da operação", fontsize=9)
+    axes[-1].set_xlabel("")
     figure.suptitle("Disponibilidade de BT no tempo", x=0.03, y=0.988, ha="left", fontsize=17, fontweight="bold")
     legend_handles = [
         Line2D([0], [0], color=cor_ocupada, lw=2, label="BTs ocupadas"),
         Line2D([0], [0], color=cor_livre, lw=2, label="BTs livres"),
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="w",
-            markerfacecolor=cor_retorno,
-            markeredgecolor="white",
-            markersize=6,
-            label="Retorno da BT",
-        ),
     ]
     figure.legend(
         handles=legend_handles,
         loc="upper left",
         bbox_to_anchor=(0.03, 0.945),
         frameon=False,
-        ncol=3,
+        ncol=2,
         fontsize=8.5,
         columnspacing=1.6,
         handlelength=2.2,
@@ -548,7 +456,6 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
             programacoes_por_grupo[concretagem.grupo_bt].append(concretagem.nome_programacao)
 
     row_heights: list[float] = []
-    footer_group_lines: list[str] = []
     subplot_titles: list[str] = []
     spacer_rows: list[int] = []
     total_rows = 0
@@ -556,7 +463,6 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
         label = resultado.bt_group_labels.get(group_key, group_key)
         total_bt = resultado.bt_counts[group_key]
         nomes_programacoes = " | ".join(programacoes_por_grupo.get(group_key, []))
-        footer_group_lines.append(f"{label}: total considerado {total_bt} BT(s)")
         subplot_titles.extend([nomes_programacoes or label, ""])
         row_heights.extend([0.58, 0.42])
         total_rows += 2
@@ -723,7 +629,7 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
                     name="Retorno da BT",
                     legendgroup="retorno",
                     legendrank=3,
-                    showlegend=current_row == 1,
+                    showlegend=False,
                     hovertemplate=(
                         f"{label}<br>"
                         "Retorno: %{x|%H:%M}<br>"
@@ -811,24 +717,48 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
     for row in range(1, total_rows):
         figura.update_xaxes(showticklabels=False, row=row, col=1)
 
-    footer_line_count = max(1, len(footer_group_lines))
-    bottom_margin = 180 + (footer_line_count * 20)
+    figure_height = max(760, 300 * len(grupos) + 120)
+
+    def _paper_units(px: float) -> float:
+        return px / figure_height
+
+    top_title_y = 0.988
+    top_reserved_px = 84
+    plot_domain_top = 1 - _paper_units(top_reserved_px)
+
+    footer_bottom_padding_px = 18
+    plot_to_legend_gap_px = 14
+    legend_block_height_px = 38
+    xaxis_tick_band_px = 30
+
+    footer_total_reserved_px = (
+        footer_bottom_padding_px
+        + legend_block_height_px
+        + plot_to_legend_gap_px
+        + xaxis_tick_band_px
+    )
+    footer_reserved_height = max(_paper_units(footer_total_reserved_px), _paper_units(112))
+    plot_domain_bottom = footer_reserved_height
+    plot_span = plot_domain_top - plot_domain_bottom
+    footer_legend_y = plot_domain_bottom - _paper_units(xaxis_tick_band_px + plot_to_legend_gap_px)
+
     figura.update_layout(
         title={
             "text": "Disponibilidade de BT no tempo",
             "x": 0.0,
             "xanchor": "left",
+            "y": top_title_y,
             "font": {"size": 20, "color": "#1f2937"},
         },
-        height=max(820, 300 * len(grupos) + 150 + (footer_line_count * 18)),
+        height=figure_height,
         plot_bgcolor="white",
         paper_bgcolor="white",
         font={"color": "#243041", "size": 12},
-        margin={"l": 72, "r": 40, "t": 86, "b": bottom_margin},
+        margin={"l": 72, "r": 40, "t": 102, "b": max(88, int(footer_total_reserved_px + 20))},
         legend={
             "orientation": "h",
             "x": 0.0,
-            "y": -0.09,
+            "y": footer_legend_y,
             "xanchor": "left",
             "yanchor": "top",
             "bgcolor": "rgba(255,255,255,0.92)",
@@ -840,35 +770,22 @@ def gerar_disponibilidade_bt_interativa(resultado: ResultadoCalculo):
             annotation.update(
                 font={"size": 11.5, "color": "#334155"},
                 xanchor="left",
+                y=plot_domain_bottom + (annotation.y * plot_span),
             )
-    figura.update_xaxes(title_text="", row=total_rows, col=1)
 
-    if footer_group_lines:
-        figura.add_annotation(
-            x=0.0,
-            y=-0.17,
-            xref="paper",
-            yref="paper",
-            text="<b>Frotas consideradas</b>",
-            showarrow=False,
-            xanchor="left",
-            yanchor="top",
-            align="left",
-            font={"size": 12, "color": "#1f2937"},
-        )
-        figura.add_annotation(
-            x=0.0,
-            y=-0.225,
-            xref="paper",
-            yref="paper",
-            text="<br>".join(footer_group_lines),
-            showarrow=False,
-            xanchor="left",
-            yanchor="top",
-            align="left",
-            yshift=-8,
-            font={"size": 11, "color": "#334155"},
-        )
+    layout_json = figura.layout.to_plotly_json()
+    for axis_key, axis_value in layout_json.items():
+        if not axis_key.startswith("yaxis"):
+            continue
+        if not isinstance(axis_value, dict) or "domain" not in axis_value:
+            continue
+        domain = axis_value["domain"]
+        figura.layout[axis_key].domain = [
+            plot_domain_bottom + (domain[0] * plot_span),
+            plot_domain_bottom + (domain[1] * plot_span),
+        ]
+
+    figura.update_xaxes(title_text="", row=total_rows, col=1)
     return figura
 
 
@@ -918,8 +835,6 @@ def gerar_gantt_interativo(
     end_annotations: list[tuple[object, str, str]] = []
     min_inicio = None
     max_fim = None
-    plot_domain_bottom = 0.225
-
     previous_program = None
     gap_count = 0
     for viagem in viagens:
@@ -1012,6 +927,34 @@ def gerar_gantt_interativo(
         category_orders={"Viagem": category_order},
         custom_data=["Programação", "Etapa", "Início_fmt", "Fim_fmt", "Duração_min", "BT"],
     )
+    top_title_y = 0.988
+    top_reserved_px = 84
+    figure_height = max(
+        700,
+        110 + (len(category_order) * 46),
+    )
+
+    def _paper_units(px: float) -> float:
+        return px / figure_height
+
+    plot_domain_top = 1 - _paper_units(top_reserved_px)
+    top_annotation_y = plot_domain_top + _paper_units(10)
+
+    footer_bottom_padding_px = 18
+    plot_to_legend_gap_px = 14
+    legend_block_height_px = 38
+    xaxis_tick_band_px = 30
+    footer_total_reserved_px = (
+        footer_bottom_padding_px
+        + legend_block_height_px
+        + plot_to_legend_gap_px
+        + xaxis_tick_band_px
+    )
+
+    footer_reserved_height = max(_paper_units(footer_total_reserved_px), _paper_units(112))
+    plot_domain_bottom = footer_reserved_height
+    footer_legend_y = plot_domain_bottom - _paper_units(xaxis_tick_band_px + plot_to_legend_gap_px)
+
     figura.update_traces(
         hovertemplate=(
             "<b>%{customdata[0]}</b><br>"
@@ -1054,7 +997,7 @@ def gerar_gantt_interativo(
         if annotation_text:
             figura.add_annotation(
                 x=when,
-                y=1.02,
+                y=top_annotation_y,
                 xref="x",
                 yref="paper",
                 text=annotation_text,
@@ -1155,57 +1098,26 @@ def gerar_gantt_interativo(
             font={"size": 10, "color": "#64748b"},
         )
 
-    footer_columns = _build_interactive_context_columns(resultado)
-    footer_line_widths = [44, 34, 34]
-    wrapped_footer_columns: list[tuple[str, str, int]] = []
-    max_footer_body_lines = 1
-    for index, (title, lines) in enumerate(footer_columns[:3]):
-        wrapped_body = (
-            _wrap_plotly_context_lines(lines, footer_line_widths[index])
-            if lines
-            else "Sem informações adicionais."
-        )
-        body_line_count = max(1, wrapped_body.count("<br>") + 1)
-        max_footer_body_lines = max(max_footer_body_lines, body_line_count)
-        wrapped_footer_columns.append((title, wrapped_body, body_line_count))
-
-    footer_line_height = 0.022
-    footer_bottom_padding = 0.026
-    footer_title_gap = 0.034
-    footer_to_legend_gap = 0.03
-    legend_block_height = 0.07
-    legend_to_xaxis_gap = 0.04
-    xaxis_tick_band = 0.07
-
-    footer_body_y = footer_bottom_padding + (footer_line_height * max(0, max_footer_body_lines - 1))
-    footer_title_y = footer_body_y + footer_title_gap
-    footer_legend_y = footer_title_y + footer_to_legend_gap + legend_block_height
-    footer_reserved_height = (
-        footer_bottom_padding
-        + (footer_line_height * max_footer_body_lines)
-        + footer_title_gap
-        + footer_to_legend_gap
-        + legend_block_height
-        + legend_to_xaxis_gap
-        + xaxis_tick_band
-    )
-    plot_domain_bottom = min(max(footer_reserved_height, 0.32), 0.5)
-
     figura.update_layout(
         title={
             "text": "Planejamento Concretagem",
             "x": 0.0,
             "xanchor": "left",
-            "y": 0.982,
+            "y": top_title_y,
             "font": {"size": 20, "color": "#1f2937"},
         },
         barmode="overlay",
         bargap=0.28,
-        height=max(700, 110 + (len(category_order) * 46)),
+        height=figure_height,
         plot_bgcolor="white",
         paper_bgcolor="white",
         legend_title_text="<b>Etapas</b>",
-        margin={"l": 72, "r": 72, "t": 92, "b": 52},
+        margin={
+            "l": 72,
+            "r": 72,
+            "t": 102,
+            "b": max(88, int(footer_total_reserved_px + 20)),
+        },
         font={"color": "#243041", "size": 12},
         legend={
             "font": {"color": "#243041", "size": 11},
@@ -1243,39 +1155,9 @@ def gerar_gantt_interativo(
         linecolor="rgba(31,41,55,0.28)",
         zeroline=False,
     )
-    figura.update_yaxes(domain=[plot_domain_bottom, 1.0])
+    figura.update_yaxes(domain=[plot_domain_bottom, plot_domain_top])
     if min_inicio is not None and max_fim is not None:
         figura.update_xaxes(range=[min_inicio - timedelta(minutes=6), max_fim + timedelta(minutes=6)])
-
-    if wrapped_footer_columns:
-        column_count = min(len(wrapped_footer_columns), 3)
-        x_positions = [index / column_count for index in range(column_count)]
-        for index, (title, body_lines, _body_line_count) in enumerate(wrapped_footer_columns[:3]):
-            x_pos = x_positions[index]
-            figura.add_annotation(
-                x=x_pos,
-                y=footer_title_y,
-                xref="paper",
-                yref="paper",
-                text=f"<b>{title}</b>",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                font={"size": 11, "color": "#243041"},
-            )
-            figura.add_annotation(
-                x=x_pos,
-                y=footer_body_y,
-                xref="paper",
-                yref="paper",
-                text=body_lines,
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                font={"size": 11, "color": "#475569"},
-            )
 
     return figura
 
@@ -1313,39 +1195,30 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
         ),
     )
     num_programacoes = max(len(resultado.concretagens), 1)
-    gantt_context = gerar_contexto_gantt(resultado)
-    cycle_blocks = gantt_context["cycle_blocks"]
-    intervalos_lines = gantt_context["intervalos_lines"]
-    sequencing_lines = gantt_context["sequencing_lines"]
-    has_ops_panel = bool(intervalos_lines or sequencing_lines)
     chart_height = max(6.8, 0.7 * max(len(viagens), 1) + 1.8)
-    cycle_panel_height = max(1.75, 0.46 * max(len(cycle_blocks), 1) + 0.64)
-    ops_line_count = len(intervalos_lines[:4]) + len(sequencing_lines)
-    ops_panel_height = max(1.9, 0.17 * max(ops_line_count, 1) + 0.82) if has_ops_panel else 0.0
-    bottom_height = max(cycle_panel_height, ops_panel_height) if has_ops_panel else cycle_panel_height
-    figura_altura = chart_height + bottom_height + 0.9
+    legend_height = 0.85
+    figura_altura = chart_height + legend_height + 0.6
     figure = plt.figure(figsize=(18.8, figura_altura), facecolor="white")
     grid = figure.add_gridspec(
-        3,
+        2,
         1,
-        height_ratios=[chart_height, 0.52, bottom_height],
-        hspace=0.05,
+        height_ratios=[chart_height, legend_height],
+        hspace=0.07,
     )
     ax = figure.add_subplot(grid[0, 0])
     ax_legend = figure.add_subplot(grid[1, 0])
-    if has_ops_panel:
-        bottom_grid = grid[2, 0].subgridspec(1, 2, width_ratios=[1.1, 1.0], wspace=0.18)
-        ax_cycles = figure.add_subplot(bottom_grid[0, 0])
-        ax_ops = figure.add_subplot(bottom_grid[0, 1])
-    else:
-        ax_cycles = figure.add_subplot(grid[2, 0])
-        ax_ops = None
     ax_legend.axis("off")
-    ax_cycles.axis("off")
-    if ax_ops is not None:
-        ax_ops.axis("off")
     ax.set_facecolor("white")
 
+    cores_etapa = {
+        "Mistura": "#3f7ea3",
+        "Dosagem": "#4a8bb1",
+        "Ida": "#5b95b4",
+        "Slump": "#6ca2bf",
+        "Descarga": "#2d6f93",
+        "Lavagem": "#79abc8",
+        "Volta": "#5b88a8",
+    }
     cor_principal = "#3f7ea3"
     cor_borda = "#2e617f"
     cor_espera = "#ece9e2"
@@ -1406,7 +1279,7 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
                 width=largura,
                 left=inicio,
                 height=0.66,
-                color=cor_espera if is_wait else cor_principal,
+                color=cor_espera if is_wait else cores_etapa.get(etapa.etapa, cor_principal),
                 edgecolor=cor_espera_borda if is_wait else cor_borda,
                 hatch="////" if is_wait else None,
                 linewidth=0.95,
@@ -1497,7 +1370,6 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
         )
 
     deadlines_drawn: set[float] = set()
-    deadlines_labels: list[str] = []
     for resumo in resultado.resumo:
         deadline = resumo.get("prazo_raw")
         if deadline is None:
@@ -1506,7 +1378,6 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
         if deadline_num in deadlines_drawn:
             continue
         deadlines_drawn.add(deadline_num)
-        deadlines_labels.append(format_clock(deadline, resultado.data_base))
         ax.axvline(
             deadline_num,
             color=cor_prazo,
@@ -1570,144 +1441,24 @@ def gerar_gantt(resultado: ResultadoCalculo, observed_marker: dict | None = None
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            color=cor_inicio,
-            lw=1.8,
-            linestyle="-",
-            label=(
-                f"Início da 1ª mistura ({format_clock(primeira_mistura_referencia, resultado.data_base)})"
-                if primeira_mistura_referencia is not None
-                else "Início da 1ª mistura"
-            ),
-        )
+        Line2D([0], [0], marker="s", linestyle="None", markersize=8, markerfacecolor=color, markeredgecolor=cor_borda, label=label)
+        for label, color in cores_etapa.items()
     ]
-    if deadlines_drawn:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color=cor_prazo,
-                lw=1.4,
-                linestyle="--",
-                label=(
-                    f"Prazo limite de descarga ({', '.join(deadlines_labels)})"
-                    if deadlines_labels
-                    else "Prazo limite de descarga"
-                ),
-            )
-        )
-    if resultado.termino_ultima_descarga is not None:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color=cor_termino,
-                lw=1.5,
-                linestyle="-.",
-                label=(
-                    "Término real da última descarga "
-                    f"({format_clock(resultado.termino_ultima_descarga, resultado.data_base)})"
-                ),
-            )
-        )
-    if observed_marker_dt is not None:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color=cor_marcador_observado,
-                lw=1.6,
-                linestyle=(0, (5, 2)),
-                label=(
-                    f"{observed_marker_label or 'Marco observado'} "
-                    f"({format_clock(observed_marker_dt, resultado.data_base)})"
-                ),
-            )
-        )
-    if any(item.get("violacao") for item in resultado.intervalos_descarga):
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color=cor_intervalo,
-                lw=7,
-                alpha=0.5,
-                label="Intervalo excedido entre descargas",
-            )
-        )
     ax_legend.legend(
         handles=legend_handles,
         loc="center left",
         fontsize=8,
+        title="Etapas",
         ncol=max(1, len(legend_handles)),
         frameon=False,
         bbox_to_anchor=(0.0, 0.18),
         borderaxespad=0.0,
         columnspacing=1.4,
-        handlelength=2.6,
+        handlelength=1.2,
     )
-
-    ax_cycles.text(
-        0.0,
-        0.98,
-        "Tempos de ciclo",
-        transform=ax_cycles.transAxes,
-        fontsize=10.5,
-        fontweight="bold",
-        va="top",
-        ha="left",
-        color="#222222",
-    )
-    y_cycle = 0.88
-    cycle_step = 0.22 if len(cycle_blocks) <= 3 else 0.18
-    for program_name, etapas in cycle_blocks:
-        ax_cycles.text(
-            0.0,
-            y_cycle,
-            program_name,
-            transform=ax_cycles.transAxes,
-            fontsize=8.4,
-            fontweight="bold",
-            va="top",
-            ha="left",
-            color="#333333",
-        )
-        ax_cycles.text(
-            0.0,
-            y_cycle - 0.085,
-            etapas,
-            transform=ax_cycles.transAxes,
-            fontsize=8.4,
-            va="top",
-            ha="left",
-            color="#333333",
-        )
-        y_cycle -= cycle_step
-
-    if ax_ops is not None:
-        y_ops = 0.98
-        if intervalos_lines:
-            y_ops = _draw_section(
-                ax_ops,
-                "Continuidade operacional",
-                [f"- {item}" for item in intervalos_lines[:4]],
-                y_ops,
-                width=52,
-                wrap_lines=False,
-            )
-        if sequencing_lines:
-            _draw_section(
-                ax_ops,
-                "Sequenciamento adotado",
-                [f"- {item}" for item in sequencing_lines],
-                y_ops,
-                width=52,
-            )
 
     left_margin = _estimate_gantt_left_margin(labels)
     figure.suptitle("Planejamento concretagem", x=0.03, y=0.950, ha="left", fontsize=17, fontweight="bold")
-    figure.subplots_adjust(left=left_margin, right=0.985, top=0.92, bottom=0.05)
+    figure.subplots_adjust(left=left_margin, right=0.985, top=0.92, bottom=0.08)
     figure._preferred_pdf_left = left_margin
     return figure

@@ -31,6 +31,9 @@ from exports.pdf_export import exportar_relatorio_operacional_pdf
 
 BASE_DIR = Path(__file__).resolve().parent
 SAVED_SCENARIOS_PATH = BASE_DIR / "sample_data" / "saved_scenarios.json"
+BROWSER_SCENARIOS_STORAGE_KEY = "programacoes_concretagem_saved_scenarios_v1"
+BROWSER_SCENARIOS_STATE_KEY = "_browser_saved_scenarios_blob"
+BROWSER_SCENARIOS_WIDGET_KEY = "__browser_saved_scenarios_storage__"
 TURNO_OPTIONS = ["Diurno", "Noturno"]
 INICIO_DIA_OPTIONS = [0, 1, 2]
 INICIO_DIA_LABELS = {
@@ -61,6 +64,9 @@ def _inject_styles() -> None:
             border: none !important;
             padding: 0 !important;
             background: transparent !important;
+        }
+        .element-container:has(textarea[aria-label="__browser_saved_scenarios_storage__"]) {
+            display: none !important;
         }
         .section-helper {
             color: #5f6b7a;
@@ -1450,13 +1456,81 @@ def _collect_calculation_time_errors(selected_program_numbers: list[int] | None 
     return errors
 
 
-def _ensure_saved_scenarios_file() -> None:
-    if SAVED_SCENARIOS_PATH.exists():
+def _sync_browser_saved_scenarios_state_from_widget() -> None:
+    widget_value = st.session_state.get(BROWSER_SCENARIOS_WIDGET_KEY)
+    if widget_value is None:
         return
-    SAVED_SCENARIOS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SAVED_SCENARIOS_PATH.write_text(
-        json.dumps(_default_saved_scenarios_file(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    state_value = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
+    if widget_value != state_value:
+        st.session_state[BROWSER_SCENARIOS_STATE_KEY] = widget_value
+
+
+def _render_browser_saved_scenarios_sync() -> None:
+    desired_value = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
+    current_widget_value = st.session_state.get(BROWSER_SCENARIOS_WIDGET_KEY)
+    if current_widget_value != desired_value:
+        st.session_state[BROWSER_SCENARIOS_WIDGET_KEY] = desired_value
+
+    st.text_area(
+        BROWSER_SCENARIOS_WIDGET_KEY,
+        key=BROWSER_SCENARIOS_WIDGET_KEY,
+        label_visibility="collapsed",
+        height=1,
+    )
+
+    storage_key_json = json.dumps(BROWSER_SCENARIOS_STORAGE_KEY, ensure_ascii=False)
+    field_label_json = json.dumps(BROWSER_SCENARIOS_WIDGET_KEY, ensure_ascii=False)
+    components.html(
+        f"""
+        <script>
+        const storageKey = {storage_key_json};
+        const fieldLabel = {field_label_json};
+
+        const getField = () => {{
+          return window.parent.document.querySelector(`textarea[aria-label="${{fieldLabel}}"]`);
+        }};
+
+        const setFieldValue = (field, value) => {{
+          const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, "value")?.set;
+          if (!setter) return;
+          setter.call(field, value);
+          field.dispatchEvent(new Event("input", {{ bubbles: true }}));
+          field.dispatchEvent(new Event("change", {{ bubbles: true }}));
+        }};
+
+        const syncStorage = () => {{
+          const field = getField();
+          if (!field) return;
+
+          const stored = window.parent.localStorage.getItem(storageKey);
+          const fieldValue = field.value || "";
+
+          if (stored !== null && fieldValue.trim() === "") {{
+            setFieldValue(field, stored);
+          }} else if (stored !== fieldValue) {{
+            if (fieldValue) {{
+              window.parent.localStorage.setItem(storageKey, fieldValue);
+            }} else {{
+              window.parent.localStorage.removeItem(storageKey);
+            }}
+          }}
+
+          if (field.dataset.browserScenarioStorageBound === "true") return;
+          field.dataset.browserScenarioStorageBound = "true";
+          field.addEventListener("input", () => {{
+            const nextValue = field.value || "";
+            if (nextValue) {{
+              window.parent.localStorage.setItem(storageKey, nextValue);
+            }} else {{
+              window.parent.localStorage.removeItem(storageKey);
+            }}
+          }});
+        }};
+
+        setTimeout(syncStorage, 60);
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -1490,23 +1564,40 @@ def _normalize_scenario_record(record: dict) -> dict:
     return normalized
 
 
-def _load_saved_scenarios() -> list[dict]:
-    _ensure_saved_scenarios_file()
-    with SAVED_SCENARIOS_PATH.open("r", encoding="utf-8") as file:
-        payload = json.load(file)
+def _parse_saved_scenarios_payload(raw_payload: str | None) -> list[dict]:
+    raw_payload = str(raw_payload or "").strip()
+    if not raw_payload:
+        return []
+
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(payload, dict):
+        return []
+
     raw_scenarios = payload.get("scenarios", [])
-    normalized_scenarios = [_normalize_scenario_record(item) for item in raw_scenarios]
-    if normalized_scenarios != raw_scenarios:
+    if not isinstance(raw_scenarios, list):
+        return []
+
+    return [_normalize_scenario_record(item) for item in raw_scenarios if isinstance(item, dict)]
+
+
+def _load_saved_scenarios() -> list[dict]:
+    raw_payload = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
+    normalized_scenarios = _parse_saved_scenarios_payload(raw_payload)
+    normalized_blob = json.dumps({"scenarios": normalized_scenarios}, ensure_ascii=False)
+    if raw_payload and raw_payload != normalized_blob:
         _write_saved_scenarios(normalized_scenarios)
     return normalized_scenarios
 
 
 def _write_saved_scenarios(scenarios: list[dict]) -> None:
     scenarios = [_normalize_scenario_record(item) for item in scenarios]
-    SAVED_SCENARIOS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SAVED_SCENARIOS_PATH.write_text(
-        json.dumps({"scenarios": scenarios}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    st.session_state[BROWSER_SCENARIOS_STATE_KEY] = json.dumps(
+        {"scenarios": scenarios},
+        ensure_ascii=False,
     )
 
 
@@ -1807,6 +1898,21 @@ def _scenario_record_signature(record: dict) -> str:
 def _reset_calculation_program_selection() -> None:
     st.session_state.calc_selected_programs = []
     st.session_state.calc_selected_programs_total = 0
+    st.session_state.pop("calc_selected_programs_widget", None)
+
+
+def _store_calculation_program_selection_from_widget() -> None:
+    raw_selection = st.session_state.get("calc_selected_programs_widget", [])
+    normalized: list[int] = []
+    total_programs = int(st.session_state.get("calc_selected_programs_total", 0) or 0)
+    for item in raw_selection:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= total_programs and value not in normalized:
+            normalized.append(value)
+    st.session_state.calc_selected_programs = normalized
 
 
 def _sync_calculation_program_selection(total_programs: int) -> list[int]:
@@ -1833,6 +1939,9 @@ def _sync_calculation_program_selection(total_programs: int) -> list[int]:
 
     st.session_state.calc_selected_programs = normalized
     st.session_state.calc_selected_programs_total = total_programs
+    widget_selection = st.session_state.get("calc_selected_programs_widget")
+    if widget_selection is None or [int(item) for item in widget_selection if str(item).isdigit()] != normalized:
+        st.session_state["calc_selected_programs_widget"] = normalized.copy()
     return normalized
 
 
@@ -2086,6 +2195,54 @@ def _import_scenario_record(record: dict) -> None:
     st.session_state.toast_message = "Cenário importado com sucesso."
 
 
+def _run_current_calculation(selected_programs: list[int] | None = None):
+    available_programs = list(range(1, len(st.session_state.scenario_payloads) + 1))
+    if not available_programs:
+        raise ValueError("Cadastre ao menos uma programação para calcular.")
+
+    _sync_calculation_program_selection(len(available_programs))
+    if selected_programs is None:
+        selected_programs = [
+            int(item)
+            for item in st.session_state.get("calc_selected_programs", available_programs)
+            if int(item) in available_programs
+        ]
+    else:
+        selected_programs = [int(item) for item in selected_programs if int(item) in available_programs]
+
+    if not selected_programs:
+        raise ValueError("Selecione ao menos uma programação para calcular.")
+
+    concretagens = _build_concretagens_from_form(selected_programs)
+    if st.session_state.calc_mode == "automatico":
+        resultado = calcular_dimensionamento_minimo(
+            concretagens,
+            base_date=st.session_state.current_scenario_date,
+            max_total_bts=int(st.session_state.max_total_bts),
+            sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
+            liberar_bt_compartilhada_parcialmente=bool(
+                st.session_state.liberar_bt_compartilhada_parcialmente
+            ),
+        )
+    else:
+        resultado = simular_ciclo_bt(
+            concretagens,
+            base_date=st.session_state.current_scenario_date,
+            sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
+            liberar_bt_compartilhada_parcialmente=bool(
+                st.session_state.liberar_bt_compartilhada_parcialmente
+            ),
+        )
+
+    st.session_state.resultado = resultado
+    st.session_state.last_calculated_signature = _current_calculation_signature()
+    st.session_state.show_reprogramming_section = False
+    st.session_state.resultado_reprogramado = None
+    st.session_state.reprogramacao_meta = None
+    st.session_state["base_result_default_tab"] = "Gantt operacional"
+    return resultado
+
+
 def _delete_scenario_by_id(scenario_id: str) -> None:
     target_id = scenario_id.strip()
     if target_id:
@@ -2112,8 +2269,12 @@ def _queue_duplicate_scenario(scenario_id: str) -> None:
     st.session_state.pending_scenario_action = {"type": "duplicate", "id": scenario_id}
 
 
-def _queue_import_scenario(record: dict) -> None:
-    st.session_state.pending_scenario_action = {"type": "import", "record": record}
+def _queue_import_scenario(record: dict, *, auto_calculate: bool = False) -> None:
+    st.session_state.pending_scenario_action = {
+        "type": "import",
+        "record": record,
+        "auto_calculate": bool(auto_calculate),
+    }
 
 
 def _queue_delete_scenario(scenario_id: str) -> None:
@@ -2178,6 +2339,11 @@ def _process_pending_scenario_action() -> None:
         record = pending.get("record")
         if record is not None:
             _import_scenario_record(record)
+            if bool(pending.get("auto_calculate", False)):
+                _run_current_calculation()
+                st.session_state.toast_message = (
+                    "Simulação exemplo carregada e calculada com sucesso."
+                )
         return
 
     if action_type == "delete":
@@ -3207,7 +3373,7 @@ def _render_result(
                 "Continuidade operacional",
                 continuidade_value,
                 continuidade_sub,
-                "" if not restricao_intervalo_ativa else ("ok" if resultado.atende_intervalo_descargas else "bad"),
+                "info" if not restricao_intervalo_ativa else ("ok" if resultado.atende_intervalo_descargas else "bad"),
             )
         with card_targets[2]:
             bts_card_sub = bt_summary
@@ -3895,8 +4061,11 @@ def main() -> None:
         st.session_state.last_calculated_signature = ""
     if "show_reprogramming_section" not in st.session_state:
         st.session_state.show_reprogramming_section = False
+    if BROWSER_SCENARIOS_STATE_KEY not in st.session_state:
+        st.session_state[BROWSER_SCENARIOS_STATE_KEY] = ""
 
     _inject_styles()
+    _sync_browser_saved_scenarios_state_from_widget()
 
     _process_pending_scenario_action()
     _process_pending_program_action()
@@ -4280,7 +4449,8 @@ def main() -> None:
                 "Programações para calcular",
                 options=calc_program_options,
                 format_func=lambda item: calc_program_labels[item],
-                key="calc_selected_programs",
+                key="calc_selected_programs_widget",
+                on_change=_store_calculation_program_selection_from_widget,
                 help=(
                     "Por padrão, todas as programações cadastradas entram no cálculo. "
                     "Você pode escolher só uma ou qualquer combinação entre elas."
@@ -4393,35 +4563,7 @@ def main() -> None:
 
     if calcular:
         try:
-            selected_programs = list(st.session_state.get("calc_selected_programs", []))
-            if not selected_programs:
-                raise ValueError("Selecione ao menos uma programação para calcular.")
-            concretagens = _build_concretagens_from_form(selected_programs)
-            if st.session_state.calc_mode == "automatico":
-                resultado = calcular_dimensionamento_minimo(
-                    concretagens,
-                    base_date=st.session_state.current_scenario_date,
-                    max_total_bts=int(st.session_state.max_total_bts),
-                    sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
-                    liberar_bt_compartilhada_parcialmente=bool(
-                        st.session_state.liberar_bt_compartilhada_parcialmente
-                    ),
-                )
-            else:
-                resultado = simular_ciclo_bt(
-                    concretagens,
-                    base_date=st.session_state.current_scenario_date,
-                    sequenciar_por_prioridade=bool(st.session_state.sequenciar_por_prioridade),
-                    liberar_bt_compartilhada_parcialmente=bool(
-                        st.session_state.liberar_bt_compartilhada_parcialmente
-                    ),
-                )
-            st.session_state.resultado = resultado
-            st.session_state.last_calculated_signature = _current_calculation_signature()
-            st.session_state.show_reprogramming_section = False
-            st.session_state.resultado_reprogramado = None
-            st.session_state.reprogramacao_meta = None
-            st.session_state["base_result_default_tab"] = "Gantt operacional"
+            _run_current_calculation()
             st.rerun()
         except Exception as exc:
             st.session_state.resultado = None
@@ -4464,6 +4606,7 @@ def main() -> None:
                 if meta.get("reference_label")
                 else "Marco observado"
             )
+
             _render_result(
                 st.session_state.resultado_reprogramado,
                 section_title="Seção 3A — Resultados da reprogramação",
@@ -4478,6 +4621,8 @@ def main() -> None:
                     else None
                 ),
             )
+
+    _render_browser_saved_scenarios_sync()
 
 
 if __name__ == "__main__":
