@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+import tempfile
 from copy import deepcopy
 from datetime import date, datetime, timedelta, time
 from pathlib import Path
@@ -34,6 +35,9 @@ SAVED_SCENARIOS_PATH = BASE_DIR / "sample_data" / "saved_scenarios.json"
 BROWSER_SCENARIOS_STORAGE_KEY = "programacoes_concretagem_saved_scenarios_v1"
 BROWSER_SCENARIOS_STATE_KEY = "_browser_saved_scenarios_blob"
 BROWSER_SCENARIOS_WIDGET_KEY = "__browser_saved_scenarios_storage__"
+BROWSER_DEVICE_ID_COOKIE = "programacoes_concretagem_device_id"
+BROWSER_DEVICE_ID_STORAGE_KEY = "programacoes_concretagem_device_id_v1"
+DEVICE_SCENARIOS_DIR = Path(tempfile.gettempdir()) / "programacoes_concretagem_browser_saved_scenarios"
 TURNO_OPTIONS = ["Diurno", "Noturno"]
 INICIO_DIA_OPTIONS = [0, 1, 2]
 INICIO_DIA_LABELS = {
@@ -1456,78 +1460,80 @@ def _collect_calculation_time_errors(selected_program_numbers: list[int] | None 
     return errors
 
 
-def _sync_browser_saved_scenarios_state_from_widget() -> None:
-    widget_value = st.session_state.get(BROWSER_SCENARIOS_WIDGET_KEY)
-    if widget_value is None:
-        return
-    state_value = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
-    if widget_value != state_value:
-        st.session_state[BROWSER_SCENARIOS_STATE_KEY] = widget_value
+def _sanitize_browser_device_id(raw_value: str | None) -> str:
+    candidate = str(raw_value or "").strip()
+    if not candidate:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9_-]", "", candidate)[:80]
 
 
-def _render_browser_saved_scenarios_sync() -> None:
-    desired_value = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
-    current_widget_value = st.session_state.get(BROWSER_SCENARIOS_WIDGET_KEY)
-    if current_widget_value != desired_value:
-        st.session_state[BROWSER_SCENARIOS_WIDGET_KEY] = desired_value
+def _current_browser_device_id() -> str:
+    try:
+        raw_value = st.context.cookies.get(BROWSER_DEVICE_ID_COOKIE, "")
+    except Exception:
+        raw_value = ""
+    return _sanitize_browser_device_id(raw_value)
 
-    st.text_area(
-        BROWSER_SCENARIOS_WIDGET_KEY,
-        key=BROWSER_SCENARIOS_WIDGET_KEY,
-        label_visibility="collapsed",
-        height=1,
-    )
 
-    storage_key_json = json.dumps(BROWSER_SCENARIOS_STORAGE_KEY, ensure_ascii=False)
-    field_label_json = json.dumps(BROWSER_SCENARIOS_WIDGET_KEY, ensure_ascii=False)
+def _saved_scenarios_path_for_device(device_id: str) -> Path:
+    safe_id = _sanitize_browser_device_id(device_id) or "anon"
+    return DEVICE_SCENARIOS_DIR / f"{safe_id}.json"
+
+
+def _ensure_browser_device_cookie() -> None:
+    cookie_name_json = json.dumps(BROWSER_DEVICE_ID_COOKIE, ensure_ascii=False)
+    storage_key_json = json.dumps(BROWSER_DEVICE_ID_STORAGE_KEY, ensure_ascii=False)
     components.html(
         f"""
         <script>
+        const cookieName = {cookie_name_json};
         const storageKey = {storage_key_json};
-        const fieldLabel = {field_label_json};
+        const reloadKey = `${{storageKey}}__reloaded`;
+        const appWindow = window.parent || window;
 
-        const getField = () => {{
-          return window.parent.document.querySelector(`textarea[aria-label="${{fieldLabel}}"]`);
+        const readCookie = (name) => {{
+          const prefix = `${{name}}=`;
+          const cookies = (appWindow.document.cookie || "").split(";").map((item) => item.trim());
+          const match = cookies.find((item) => item.startsWith(prefix));
+          return match ? decodeURIComponent(match.slice(prefix.length)) : "";
         }};
 
-        const setFieldValue = (field, value) => {{
-          const setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, "value")?.set;
-          if (!setter) return;
-          setter.call(field, value);
-          field.dispatchEvent(new Event("input", {{ bubbles: true }}));
-          field.dispatchEvent(new Event("change", {{ bubbles: true }}));
+        const buildDeviceId = () => {{
+          if (appWindow.crypto?.randomUUID) return appWindow.crypto.randomUUID();
+          return `pcnsa_${{Date.now()}}_${{Math.random().toString(36).slice(2, 10)}}`;
         }};
 
-        const syncStorage = () => {{
-          const field = getField();
-          if (!field) return;
-
-          const stored = window.parent.localStorage.getItem(storageKey);
-          const fieldValue = field.value || "";
-
-          if (stored !== null && fieldValue.trim() === "") {{
-            setFieldValue(field, stored);
-          }} else if (stored !== fieldValue) {{
-            if (fieldValue) {{
-              window.parent.localStorage.setItem(storageKey, fieldValue);
-            }} else {{
-              window.parent.localStorage.removeItem(storageKey);
-            }}
+        const syncDeviceCookie = () => {{
+          let storage = null;
+          let session = null;
+          try {{
+            storage = appWindow.localStorage;
+            session = appWindow.sessionStorage;
+          }} catch (error) {{
+            return;
+          }}
+          let deviceId = storage.getItem(storageKey) || "";
+          if (!deviceId) {{
+            deviceId = buildDeviceId();
+            storage.setItem(storageKey, deviceId);
           }}
 
-          if (field.dataset.browserScenarioStorageBound === "true") return;
-          field.dataset.browserScenarioStorageBound = "true";
-          field.addEventListener("input", () => {{
-            const nextValue = field.value || "";
-            if (nextValue) {{
-              window.parent.localStorage.setItem(storageKey, nextValue);
-            }} else {{
-              window.parent.localStorage.removeItem(storageKey);
-            }}
-          }});
+          const currentCookie = readCookie(cookieName);
+          if (currentCookie === deviceId) {{
+            session.removeItem(reloadKey);
+            return;
+          }}
+
+          appWindow.document.cookie =
+            `${{cookieName}}=${{encodeURIComponent(deviceId)}}; path=/; max-age=31536000; SameSite=Lax`;
+
+          if (session.getItem(reloadKey) !== deviceId) {{
+            session.setItem(reloadKey, deviceId);
+            appWindow.location.reload();
+          }}
         }};
 
-        setTimeout(syncStorage, 60);
+        setTimeout(syncDeviceCookie, 20);
         </script>
         """,
         height=0,
@@ -1585,7 +1591,19 @@ def _parse_saved_scenarios_payload(raw_payload: str | None) -> list[dict]:
 
 
 def _load_saved_scenarios() -> list[dict]:
-    raw_payload = st.session_state.get(BROWSER_SCENARIOS_STATE_KEY, "")
+    device_id = _current_browser_device_id()
+    if not device_id:
+        return st.session_state.get("_pending_saved_scenarios_without_device", [])
+
+    scenarios_path = _saved_scenarios_path_for_device(device_id)
+    if not scenarios_path.exists():
+        return []
+
+    try:
+        raw_payload = scenarios_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+
     normalized_scenarios = _parse_saved_scenarios_payload(raw_payload)
     normalized_blob = json.dumps({"scenarios": normalized_scenarios}, ensure_ascii=False)
     if raw_payload and raw_payload != normalized_blob:
@@ -1595,10 +1613,27 @@ def _load_saved_scenarios() -> list[dict]:
 
 def _write_saved_scenarios(scenarios: list[dict]) -> None:
     scenarios = [_normalize_scenario_record(item) for item in scenarios]
-    st.session_state[BROWSER_SCENARIOS_STATE_KEY] = json.dumps(
-        {"scenarios": scenarios},
-        ensure_ascii=False,
+    device_id = _current_browser_device_id()
+    if not device_id:
+        st.session_state["_pending_saved_scenarios_without_device"] = scenarios
+        return
+
+    st.session_state["_pending_saved_scenarios_without_device"] = []
+    DEVICE_SCENARIOS_DIR.mkdir(parents=True, exist_ok=True)
+    scenarios_path = _saved_scenarios_path_for_device(device_id)
+    scenarios_path.write_text(
+        json.dumps({"scenarios": scenarios}, ensure_ascii=False),
+        encoding="utf-8",
     )
+
+
+def _flush_pending_saved_scenarios_if_needed() -> None:
+    pending = st.session_state.get("_pending_saved_scenarios_without_device", [])
+    if not pending:
+        return
+    if not _current_browser_device_id():
+        return
+    _write_saved_scenarios(pending)
 
 
 def _build_scenario_label(scenario_name: str, scenario_date: date, turno: str) -> str:
@@ -4061,11 +4096,12 @@ def main() -> None:
         st.session_state.last_calculated_signature = ""
     if "show_reprogramming_section" not in st.session_state:
         st.session_state.show_reprogramming_section = False
-    if BROWSER_SCENARIOS_STATE_KEY not in st.session_state:
-        st.session_state[BROWSER_SCENARIOS_STATE_KEY] = ""
+    if "_pending_saved_scenarios_without_device" not in st.session_state:
+        st.session_state["_pending_saved_scenarios_without_device"] = []
 
     _inject_styles()
-    _sync_browser_saved_scenarios_state_from_widget()
+    _ensure_browser_device_cookie()
+    _flush_pending_saved_scenarios_if_needed()
 
     _process_pending_scenario_action()
     _process_pending_program_action()
@@ -4621,8 +4657,6 @@ def main() -> None:
                     else None
                 ),
             )
-
-    _render_browser_saved_scenarios_sync()
 
 
 if __name__ == "__main__":
