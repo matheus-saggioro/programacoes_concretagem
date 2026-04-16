@@ -33,10 +33,8 @@ from exports.pdf_export import exportar_relatorio_operacional_pdf
 BASE_DIR = Path(__file__).resolve().parent
 SAVED_SCENARIOS_PATH = BASE_DIR / "sample_data" / "saved_scenarios.json"
 BROWSER_SCENARIOS_STORAGE_KEY = "programacoes_concretagem_saved_scenarios_v1"
-BROWSER_SCENARIOS_STATE_KEY = "_browser_saved_scenarios_blob"
-BROWSER_SCENARIOS_WIDGET_KEY = "__browser_saved_scenarios_storage__"
-BROWSER_DEVICE_ID_COOKIE = "programacoes_concretagem_device_id"
 BROWSER_DEVICE_ID_STORAGE_KEY = "programacoes_concretagem_device_id_v1"
+BROWSER_DEVICE_QUERY_KEY = "pcid"
 DEVICE_SCENARIOS_DIR = Path(tempfile.gettempdir()) / "programacoes_concretagem_browser_saved_scenarios"
 TURNO_OPTIONS = ["Diurno", "Noturno"]
 INICIO_DIA_OPTIONS = [0, 1, 2]
@@ -1469,7 +1467,7 @@ def _sanitize_browser_device_id(raw_value: str | None) -> str:
 
 def _current_browser_device_id() -> str:
     try:
-        raw_value = st.context.cookies.get(BROWSER_DEVICE_ID_COOKIE, "")
+        raw_value = st.query_params.get(BROWSER_DEVICE_QUERY_KEY, "")
     except Exception:
         raw_value = ""
     return _sanitize_browser_device_id(raw_value)
@@ -1480,23 +1478,16 @@ def _saved_scenarios_path_for_device(device_id: str) -> Path:
     return DEVICE_SCENARIOS_DIR / f"{safe_id}.json"
 
 
-def _ensure_browser_device_cookie() -> None:
-    cookie_name_json = json.dumps(BROWSER_DEVICE_ID_COOKIE, ensure_ascii=False)
+def _ensure_browser_device_identity() -> None:
+    query_key_json = json.dumps(BROWSER_DEVICE_QUERY_KEY, ensure_ascii=False)
     storage_key_json = json.dumps(BROWSER_DEVICE_ID_STORAGE_KEY, ensure_ascii=False)
     components.html(
         f"""
         <script>
-        const cookieName = {cookie_name_json};
+        const queryKey = {query_key_json};
         const storageKey = {storage_key_json};
         const reloadKey = `${{storageKey}}__reloaded`;
         const appWindow = window.parent || window;
-
-        const readCookie = (name) => {{
-          const prefix = `${{name}}=`;
-          const cookies = (appWindow.document.cookie || "").split(";").map((item) => item.trim());
-          const match = cookies.find((item) => item.startsWith(prefix));
-          return match ? decodeURIComponent(match.slice(prefix.length)) : "";
-        }};
 
         const buildDeviceId = () => {{
           if (appWindow.crypto?.randomUUID) return appWindow.crypto.randomUUID();
@@ -1512,24 +1503,25 @@ def _ensure_browser_device_cookie() -> None:
           }} catch (error) {{
             return;
           }}
-          let deviceId = storage.getItem(storageKey) || "";
+          const url = new URL(appWindow.location.href);
+          const urlDeviceId = (url.searchParams.get(queryKey) || '').trim();
+          let deviceId = urlDeviceId || storage.getItem(storageKey) || "";
           if (!deviceId) {{
             deviceId = buildDeviceId();
+          }}
+          if (storage.getItem(storageKey) !== deviceId) {{
             storage.setItem(storageKey, deviceId);
           }}
-
-          const currentCookie = readCookie(cookieName);
-          if (currentCookie === deviceId) {{
+          if (urlDeviceId === deviceId) {{
             session.removeItem(reloadKey);
             return;
           }}
 
-          appWindow.document.cookie =
-            `${{cookieName}}=${{encodeURIComponent(deviceId)}}; path=/; max-age=31536000; SameSite=Lax`;
+          url.searchParams.set(queryKey, deviceId);
 
           if (session.getItem(reloadKey) !== deviceId) {{
             session.setItem(reloadKey, deviceId);
-            appWindow.location.reload();
+            appWindow.location.replace(url.toString());
           }}
         }};
 
@@ -1634,6 +1626,10 @@ def _flush_pending_saved_scenarios_if_needed() -> None:
     if not _current_browser_device_id():
         return
     _write_saved_scenarios(pending)
+
+
+def _browser_device_identity_ready() -> bool:
+    return bool(_current_browser_device_id())
 
 
 def _build_scenario_label(scenario_name: str, scenario_date: date, turno: str) -> str:
@@ -4100,7 +4096,10 @@ def main() -> None:
         st.session_state["_pending_saved_scenarios_without_device"] = []
 
     _inject_styles()
-    _ensure_browser_device_cookie()
+    _ensure_browser_device_identity()
+    if not _browser_device_identity_ready():
+        st.info("Inicializando armazenamento local do navegador. A página será atualizada automaticamente.")
+        st.stop()
     _flush_pending_saved_scenarios_if_needed()
 
     _process_pending_scenario_action()
