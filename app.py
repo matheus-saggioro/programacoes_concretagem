@@ -7,6 +7,7 @@ import tempfile
 from copy import deepcopy
 from datetime import date, datetime, timedelta, time
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -1478,6 +1479,23 @@ def _saved_scenarios_path_for_device(device_id: str) -> Path:
     return DEVICE_SCENARIOS_DIR / f"{safe_id}.json"
 
 
+def _bootstrap_browser_device_identity() -> bool:
+    device_id = _current_browser_device_id()
+    if device_id:
+        return True
+
+    bootstrap_id = _sanitize_browser_device_id(
+        st.session_state.get("_browser_device_bootstrap_id")
+    )
+    if not bootstrap_id:
+        bootstrap_id = uuid4().hex
+        st.session_state["_browser_device_bootstrap_id"] = bootstrap_id
+
+    st.query_params[BROWSER_DEVICE_QUERY_KEY] = bootstrap_id
+    st.rerun()
+    return False
+
+
 def _ensure_browser_device_identity() -> None:
     query_key_json = json.dumps(BROWSER_DEVICE_QUERY_KEY, ensure_ascii=False)
     storage_key_json = json.dumps(BROWSER_DEVICE_ID_STORAGE_KEY, ensure_ascii=False)
@@ -1505,22 +1523,26 @@ def _ensure_browser_device_identity() -> None:
           }}
           const url = new URL(appWindow.location.href);
           const urlDeviceId = (url.searchParams.get(queryKey) || '').trim();
-          let deviceId = urlDeviceId || storage.getItem(storageKey) || "";
-          if (!deviceId) {{
-            deviceId = buildDeviceId();
+          if (!urlDeviceId) {{
+            return;
           }}
-          if (storage.getItem(storageKey) !== deviceId) {{
-            storage.setItem(storageKey, deviceId);
-          }}
-          if (urlDeviceId === deviceId) {{
+
+          const storedDeviceId = (storage.getItem(storageKey) || '').trim();
+          if (!storedDeviceId) {{
+            storage.setItem(storageKey, urlDeviceId);
             session.removeItem(reloadKey);
             return;
           }}
 
-          url.searchParams.set(queryKey, deviceId);
+          if (storedDeviceId === urlDeviceId) {{
+            session.removeItem(reloadKey);
+            return;
+          }}
 
-          if (session.getItem(reloadKey) !== deviceId) {{
-            session.setItem(reloadKey, deviceId);
+          url.searchParams.set(queryKey, storedDeviceId);
+
+          if (session.getItem(reloadKey) !== storedDeviceId) {{
+            session.setItem(reloadKey, storedDeviceId);
             appWindow.location.replace(url.toString());
           }}
         }};
@@ -1626,10 +1648,6 @@ def _flush_pending_saved_scenarios_if_needed() -> None:
     if not _current_browser_device_id():
         return
     _write_saved_scenarios(pending)
-
-
-def _browser_device_identity_ready() -> bool:
-    return bool(_current_browser_device_id())
 
 
 def _build_scenario_label(scenario_name: str, scenario_date: date, turno: str) -> str:
@@ -4094,12 +4112,13 @@ def main() -> None:
         st.session_state.show_reprogramming_section = False
     if "_pending_saved_scenarios_without_device" not in st.session_state:
         st.session_state["_pending_saved_scenarios_without_device"] = []
+    if "_browser_device_bootstrap_id" not in st.session_state:
+        st.session_state["_browser_device_bootstrap_id"] = ""
 
     _inject_styles()
+    if not _bootstrap_browser_device_identity():
+        return
     _ensure_browser_device_identity()
-    if not _browser_device_identity_ready():
-        st.info("Inicializando armazenamento local do navegador. A página será atualizada automaticamente.")
-        st.stop()
     _flush_pending_saved_scenarios_if_needed()
 
     _process_pending_scenario_action()
