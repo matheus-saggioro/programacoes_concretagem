@@ -54,6 +54,7 @@ class SequencingContext:
     ordered_ids_by_group: dict[str, list[str]]
     active_id_by_group: dict[str, str | None]
     progressive_trip_limit_by_group: dict[str, int]
+    previous_id_by_concretagem: dict[str, str | None]
 
 
 def validar_concretagens(concretagens: Iterable[Concretagem]) -> None:
@@ -718,6 +719,7 @@ def _build_sequencing_context(
             ordered_ids_by_group={},
             active_id_by_group={},
             progressive_trip_limit_by_group={},
+            previous_id_by_concretagem={},
         )
 
     members_by_group: dict[str, list[Concretagem]] = defaultdict(list)
@@ -727,6 +729,7 @@ def _build_sequencing_context(
     ordered_ids_by_group: dict[str, list[str]] = {}
     active_id_by_group: dict[str, str | None] = {}
     progressive_trip_limit_by_group: dict[str, int] = {}
+    previous_id_by_concretagem: dict[str, str | None] = {}
     for group_key, members in members_by_group.items():
         if len(members) <= 1:
             continue
@@ -739,6 +742,10 @@ def _build_sequencing_context(
             ),
         )
         ordered_ids_by_group[group_key] = [item.id for item in ordered]
+        for index, item in enumerate(ordered):
+            previous_id_by_concretagem[item.id] = (
+                ordered[index - 1].id if index > 0 else None
+            )
         active_id_by_group[group_key] = None
         if (
             liberar_bt_compartilhada_parcialmente
@@ -751,6 +758,7 @@ def _build_sequencing_context(
         ordered_ids_by_group=ordered_ids_by_group,
         active_id_by_group=active_id_by_group,
         progressive_trip_limit_by_group=progressive_trip_limit_by_group,
+        previous_id_by_concretagem=previous_id_by_concretagem,
     )
 
 
@@ -781,17 +789,40 @@ def _resolve_group_active_concretagem(
         sequencing.active_id_by_group[group_key] = None
         return None
 
-    active_id = sequencing.active_id_by_group.get(group_key)
-    if active_id is not None and next_trip_index[active_id] < len(trips_by_scenario[active_id]):
-        return active_id
-
-    for concretagem_id in sequencing.ordered_ids_by_group[group_key]:
-        if next_trip_index[concretagem_id] < len(trips_by_scenario[concretagem_id]):
-            sequencing.active_id_by_group[group_key] = concretagem_id
-            return concretagem_id
-
-    sequencing.active_id_by_group[group_key] = None
     return None
+
+
+def _sequencing_block_until(
+    concretagem: Concretagem,
+    sequencing: SequencingContext,
+    trips_by_scenario: dict[str, list[Viagem]],
+    next_trip_index: dict[str, int],
+) -> datetime | None:
+    if not sequencing.enabled:
+        return None
+
+    group_key = concretagem.grupo_bt
+    if group_key not in sequencing.ordered_ids_by_group:
+        return None
+
+    if sequencing.progressive_trip_limit_by_group.get(group_key) is not None:
+        return None
+
+    previous_id = sequencing.previous_id_by_concretagem.get(concretagem.id)
+    if not previous_id:
+        return None
+
+    previous_trips = trips_by_scenario[previous_id]
+    if next_trip_index[previous_id] < len(previous_trips):
+        return datetime.max
+
+    if any(trip.fim_viagem is None for trip in previous_trips):
+        return datetime.max
+
+    return max(
+        (trip.fim_viagem for trip in previous_trips if trip.fim_viagem is not None),
+        default=None,
+    )
 
 
 def _priority_sort_value(prioridade: int) -> int:
@@ -1190,6 +1221,16 @@ def _simulate_with_bt_counts(
             fleet = fleets[trip.grupo_bt]
             truck = fleet.peek_next_available()
             truck_ready = max(truck.available_at, concretagem.inicio_datetime(data_base))
+            sequencing_block_until = _sequencing_block_until(
+                concretagem,
+                sequencing,
+                trips_by_scenario,
+                next_trip_index,
+            )
+            if sequencing_block_until == datetime.max:
+                continue
+            if sequencing_block_until is not None:
+                truck_ready = max(truck_ready, sequencing_block_until)
             front_key = front_resource_key(
                 concretagem.local,
                 concretagem.elemento_frente,
@@ -1391,6 +1432,10 @@ def _simulate_with_bt_counts(
     if sequencing.progressive_trip_limit_by_group:
         premissas.append(
             "Para BTs compartilhadas com sequenciamento por prioridade, as próximas programações só iniciam após o esgotamento das cargas previstas da prioridade atual; a partir daí, as BTs retornadas passam a alimentar a prioridade seguinte."
+        )
+    elif sequencing.enabled:
+        premissas.append(
+            "Para BTs compartilhadas com sequenciamento por prioridade e sem liberações parciais, a próxima programação só inicia após a liberação total da frota utilizada pela prioridade anterior."
         )
 
     result = ResultadoCalculo(
